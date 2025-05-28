@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -32,11 +32,7 @@ export default function Home() {
   const [agentSymbol, setAgentSymbol] = useState('');
   const [deposit, setDeposit] = useState('6000');
 
-  useEffect(() => {
-    checkConnection();
-  }, []);
-
-  const checkConnection = async () => {
+  const checkConnection = useCallback(async () => {
     try {
       if (web3Service.isConnected()) {
         const addr = await web3Service.getAddress();
@@ -47,7 +43,11 @@ export default function Home() {
     } catch (error) {
       console.error('Connection check failed:', error);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    checkConnection();
+  }, [checkConnection]);
 
   const connectWallet = async () => {
     try {
@@ -214,7 +214,7 @@ export default function Home() {
         <div className="flex justify-between items-center mb-8">
           <div>
             <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-              Virtuals Protocol
+            EasyV Protocol
             </h1>
             <p className="text-slate-600 dark:text-slate-400 mt-2">
               Create and trade AI agents with bonding curves
@@ -248,7 +248,7 @@ export default function Home() {
                     <div>
                       <p className="font-semibold">Wrong Network Detected</p>
                       <p className="text-sm">
-                        You're connected to {networkStatus.name} (Chain ID: {networkStatus.chainId}). 
+                        You&apos;re connected to {networkStatus.name} (Chain ID: {networkStatus.chainId}). 
                         Please switch to Hardhat Local Network (Chain ID: 31337) to use this app.
                       </p>
                       <p className="text-xs mt-1">
@@ -399,7 +399,7 @@ export default function Home() {
                 {loading ? 'Connecting...' : 'Connect Wallet'}
               </Button>
               <p className="text-xs text-slate-500 mt-4">
-                Make sure you're connected to the Hardhat local network
+                Make sure you&apos;re connected to the Hardhat local network
               </p>
             </CardContent>
           </Card>

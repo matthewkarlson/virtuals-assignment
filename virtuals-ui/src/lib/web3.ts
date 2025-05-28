@@ -3,7 +3,9 @@ import { CONTRACTS, ABIS, NETWORK_CONFIG } from './contracts';
 
 declare global {
   interface Window {
-    ethereum?: any;
+    ethereum?: {
+      request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
+    };
   }
 }
 
@@ -50,9 +52,9 @@ export class Web3Service {
         method: 'wallet_switchEthereumChain',
         params: [{ chainId: `0x${NETWORK_CONFIG.chainId.toString(16)}` }],
       });
-    } catch (switchError: any) {
+    } catch (switchError: unknown) {
       // This error code indicates that the chain has not been added to MetaMask
-      if (switchError.code === 4902) {
+      if (switchError && typeof switchError === 'object' && 'code' in switchError && switchError.code === 4902) {
         try {
           await window.ethereum.request({
             method: 'wallet_addEthereumChain',
@@ -67,10 +69,10 @@ export class Web3Service {
               },
             }],
           });
-        } catch (addError: any) {
+        } catch (addError: unknown) {
           console.error('Failed to add network:', addError);
           // If adding fails, try to switch again in case it was already added
-          if (addError.code === -32603) {
+          if (addError && typeof addError === 'object' && 'code' in addError && addError.code === -32603) {
             // Network might already exist, try switching again
             await window.ethereum.request({
               method: 'wallet_switchEthereumChain',
