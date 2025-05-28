@@ -1,13 +1,350 @@
-# Sample Hardhat Project
+# Virtual Protocol: Comprehensive Smart Contract Architecture Guide
 
-This project demonstrates a basic Hardhat use case. It comes with a sample contract, a test for that contract, and a Hardhat Ignition module that deploys that contract.
+## Table of Contents
+1. [Overview](#overview)
+2. [Core Architecture](#core-architecture)
+3. [Agent Creation Flow](#agent-creation-flow)
+4. [Bonding Curve & AMM Graduation](#bonding-curve--amm-graduation)
+5. [Tokenomics & Staking](#tokenomics--staking)
+6. [Governance System](#governance-system)
+7. [Reward Distribution](#reward-distribution)
+8. [Contribution System](#contribution-system)
+9. [Tax & Fee Management](#tax--fee-management)
+10. [Contract Interactions](#contract-interactions)
 
-Try running some of the following tasks:
+## Overview
 
-```shell
-npx hardhat help
-npx hardhat test
-REPORT_GAS=true npx hardhat test
-npx hardhat node
-npx hardhat ignition deploy ./ignition/modules/Lock.ts
+Virtual Protocol is a decentralized ecosystem for creating and managing AI agents with their own tokens, governance, and economic systems. The protocol enables users to create AI agents that graduate from bonding curves to full AMM trading, with sophisticated reward distribution and governance mechanisms.
+
+## Core Architecture
+
+### Primary Components
+
+1. **Agent Factory** - Creates and manages AI agents
+2. **Bonding Curve System** - Initial price discovery mechanism
+3. **AMM Integration** - Uniswap V2 integration for mature agents
+4. **Governance DAOs** - Agent-specific governance
+5. **Reward Distribution** - Multi-tier reward system
+6. **Contribution System** - NFT-based contribution tracking
+
+## Agent Creation Flow
+
+### 1. Agent Proposal
+
+Users can propose new agents through the `AgentFactory` contract:
+
+```solidity
+// contracts/virtualPersona/AgentFactoryV4.sol:160-180
+function proposeAgent(
+    string memory name,
+    string memory symbol,
+    string memory tokenURI,
+    uint8[] memory cores,
+    bytes32 tbaSalt,
+    address tbaImplementation,
+    uint32 daoVotingPeriod,
+    uint256 daoThreshold
+) external returns (uint256)
 ```
+
+**Process:**
+1. User pays application threshold in VIRTUAL tokens
+2. Application is stored with `ApplicationStatus.Active`
+3. Returns unique application ID
+
+### 2. Agent Execution
+
+Once approved, agents are created through a comprehensive bootstrap process:
+
+```solidity
+// contracts/virtualPersona/AgentFactoryV4.sol:247-330
+function _executeApplication(uint256 id, bool canStake, bytes memory tokenSupplyParams_) internal
+```
+
+**Components Created (C1-C7):**
+- **C1**: Agent Token (ERC20 with bonding curve mechanics)
+- **C2**: LP Pool + Initial liquidity
+- **C3**: Agent veToken (voting escrow token for staking)
+- **C4**: Agent DAO (governance contract)
+- **C5**: Agent NFT (ERC721 representing the agent)
+- **C6**: TBA (Token Bound Account via ERC6551)
+- **C7**: Initial liquidity staking
+
+## Bonding Curve & AMM Graduation
+
+### Bonding Curve Mechanics
+
+The bonding curve system provides initial price discovery for new agent tokens:
+
+```solidity
+// contracts/fun/Bonding.sol:31
+uint256 public constant K = 3_000_000_000_000;
+```
+
+**Launch Process:**
+```solidity
+// contracts/fun/Bonding.sol:160-230
+function launch(
+    string memory _name,
+    string memory _ticker,
+    uint8[] memory cores,
+    string memory desc,
+    string memory img,
+    string[4] memory urls,
+    uint256 purchaseAmount
+) external returns (address, address, uint256)
+```
+
+### Graduation Mechanism
+
+Agents graduate to Uniswap when reserves hit the graduation threshold:
+
+```solidity
+// contracts/fun/Bonding.sol:350-380
+function _openTradingOnUniswap(address tokenAddress) private
+```
+
+**Graduation Trigger:**
+```solidity
+// contracts/fun/Bonding.sol:320-325
+if (newReserveA <= gradThreshold && tokenInfo[tokenAddress].trading) {
+    _openTradingOnUniswap(tokenAddress);
+}
+```
+
+**Graduation Process:**
+1. Bonding curve trading stops
+2. Liquidity migrates to Uniswap V2
+3. Agent token is created via `AgentFactory`
+4. Original fun tokens can be unwrapped for agent tokens
+
+## Tokenomics & Staking
+
+### Agent Token Structure
+
+Each agent has multiple token types:
+
+1. **Agent Token** - Main trading token
+2. **veToken** - Voting escrow token for governance
+3. **LP Token** - Liquidity provider token
+
+### Staking Mechanism
+
+Users stake LP tokens to receive veTokens with voting power:
+
+```solidity
+// contracts/virtualPersona/AgentVeToken.sol:60-90
+function stake(uint256 amount, address receiver, address delegatee) public
+```
+
+**Staking Features:**
+- Delegation to validators for governance participation
+- Voting power based on staked amount
+- Maturity periods for founder protection
+
+### Vote Escrow System
+
+The protocol also includes a global veVIRTUAL system:
+
+```solidity
+// contracts/token/veVirtual.sol:140-180
+function stake(uint256 amount, uint8 numWeeks, bool autoRenew) external nonReentrant
+```
+
+**Features:**
+- Time-weighted voting power
+- Auto-renewal options
+- Decay mechanics for non-renewed positions
+
+## Governance System
+
+### Multi-Level Governance
+
+1. **Protocol DAO** - Global protocol governance
+2. **Agent DAOs** - Individual agent governance
+
+### Agent DAO Features
+
+```solidity
+// contracts/virtualPersona/AgentDAO.sol:91-110
+function propose(
+    address[] memory targets,
+    uint256[] memory values,
+    bytes[] memory calldatas,
+    string memory description
+) public override returns (uint256)
+```
+
+**Special Features:**
+- Auto-execution when 100% consensus reached
+- Validator scoring system
+- Contribution-based proposal rights
+
+### Voting Mechanics
+
+```solidity
+// contracts/virtualPersona/AgentDAO.sol:154-190
+function _castVote(
+    uint256 proposalId,
+    address account,
+    uint8 support,
+    string memory reason,
+    bytes memory params
+) internal override returns (uint256)
+```
+
+**Validator Scoring:**
+- Participation tracking via `_scores` mapping
+- Uptime calculation for reward distribution
+- Historical score queries for past performance
+
+## Reward Distribution
+
+### Multi-Tier Reward System
+
+The reward system distributes VIRTUAL tokens across multiple participant types:
+
+```solidity
+// contracts/AgentRewardV3.sol:135-160
+function distributeRewards(
+    uint256 amount,
+    uint256[] memory virtualIds,
+    bool shouldShareWithProtocol
+) public onlyGov
+```
+
+### Reward Categories
+
+1. **Protocol Rewards** - Platform treasury
+2. **Staker Rewards** - LP token stakers
+3. **Validator Rewards** - Governance participants
+4. **Contributor Rewards** - Service/contribution providers
+
+### Reward Calculation
+
+```solidity
+// contracts/AgentRewardV3.sol:232-260
+function getClaimableStakerRewards(
+    address account,
+    uint256 virtualId
+) public view returns (uint256 totalClaimable, uint256 numRewards)
+```
+
+**Factors:**
+- Staked amount proportion
+- Validator uptime/participation
+- Historical delegation patterns
+
+## Contribution System
+
+### NFT-Based Contributions
+
+Contributors can create services and datasets as NFTs:
+
+```solidity
+// contracts/contribution/ServiceNft.sol
+// contracts/contribution/ContributionNft.sol
+```
+
+**Contribution Types:**
+- Datasets
+- Models
+- Services
+- Improvements
+
+### Impact Scoring
+
+Contributions receive impact scores affecting reward distribution:
+
+```solidity
+// contracts/AgentRewardV2.sol:320-350
+function _distributeContributorRewards(
+    uint256 amount,
+    uint256 virtualId,
+    RewardSettingsCheckpoints.RewardSettings memory settings
+) private
+```
+
+## Tax & Fee Management
+
+### Trading Taxes
+
+The system implements sophisticated tax mechanisms:
+
+```solidity
+// contracts/tax/BondingTax.sol:120-150
+function swapForAsset() public onlyBondingRouter returns (bool, uint256)
+```
+
+**Tax Features:**
+- Automatic tax collection on trades
+- Threshold-based swapping
+- Treasury distribution
+
+### Fee Distribution
+
+```solidity
+// contracts/fun/FRouter.sol:120-150
+function buy(uint256 amountIn, address tokenAddress, address to) external
+```
+
+**Fee Structure:**
+- Buy/sell taxes on bonding curve trades
+- LP fees on AMM trades
+- Protocol fees for ecosystem development
+
+## Contract Interactions
+
+### Key Contract Relationships
+
+1. **AgentFactory** ↔ **AgentToken**: Creates and manages agent tokens
+2. **Bonding** ↔ **AgentFactory**: Graduates tokens from bonding curve
+3. **AgentDAO** ↔ **AgentVeToken**: Governance voting power
+4. **AgentReward** ↔ **AgentNft**: Reward distribution tracking
+5. **ServiceNft** ↔ **ContributionNft**: Contribution hierarchy
+
+### Integration Points
+
+```solidity
+// contracts/virtualPersona/AgentFactoryV3.sol:516-550
+function initFromBondingCurve(
+    string memory name,
+    string memory symbol,
+    uint8[] memory cores,
+    bytes32 tbaSalt,
+    address tbaImplementation,
+    uint32 daoVotingPeriod,
+    uint256 daoThreshold,
+    uint256 applicationThreshold_,
+    address creator
+) public whenNotPaused onlyRole(BONDING_ROLE) returns (uint256)
+```
+
+### Genesis System
+
+Special genesis events can bootstrap agents directly:
+
+```solidity
+// contracts/genesis/Genesis.sol:345-380
+function launch(
+    address[] memory distributeAgentTokenUsers,
+    uint256[] memory distributeAgentTokenUserAmounts,
+    address[] memory distributeVirtualTokenUsers,
+    uint256[] memory distributeVirtualTokenUserAmounts,
+    bool isFirstLaunch,
+    bytes32 salt
+) external onlyRole(OPERATION_ROLE)
+```
+
+## Summary
+
+Virtual Protocol creates a comprehensive ecosystem where:
+
+1. **AI Agents** are represented as tokenized entities with their own economics
+2. **Bonding Curves** provide initial price discovery before AMM graduation
+3. **Multi-tier Governance** enables both protocol and agent-level decision making
+4. **Sophisticated Rewards** incentivize all ecosystem participants
+5. **Contribution Tracking** rewards builders and improvers
+6. **Tax Systems** fund ongoing development and operations
+
+The system is designed to be self-sustaining, with economic incentives aligned across all participant types, from token holders to validators to contributors, creating a thriving ecosystem for AI agent development and deployment.
