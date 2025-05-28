@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 
 /**
  * @title AgentFactory
@@ -17,6 +18,7 @@ contract AgentFactory is Ownable {
 
     address[] public agents;
     address public bondingCurveImplementation;
+    address public uniswapRouter; // Uniswap V2 Router address
 
     event AgentCreated(address indexed curve, address indexed creator, string name, string symbol);
 
@@ -30,12 +32,18 @@ contract AgentFactory is Ownable {
         bondingCurveImplementation = _implementation;
     }
 
+    function setUniswapRouter(address _router) external onlyOwner {
+        require(_router != address(0), "invalid router");
+        uniswapRouter = _router;
+    }
+
     function createAgent(
         string calldata name,
         string calldata symbol,
         uint256 deposit
     ) external returns (address curve) {
         require(bondingCurveImplementation != address(0), "impl not set");
+        require(uniswapRouter != address(0), "router not set");
         require(deposit >= MIN_INITIAL_DEPOSIT, "dep<min");
         require(bytes(name).length > 0, "empty name");
         require(bytes(symbol).length > 0, "empty symbol");
@@ -43,11 +51,11 @@ contract AgentFactory is Ownable {
         // Transfer deposit first
         VIRTUAL.transferFrom(msg.sender, address(this), deposit);
 
-        // Create minimal proxy
-        curve = _createProxy(bondingCurveImplementation);
+        // Create clone using OpenZeppelin's Clones library
+        curve = Clones.clone(bondingCurveImplementation);
         
         // Initialize the bonding curve
-        (bool success,) = curve.call(
+        (bool success, bytes memory returnData) = curve.call(
             abi.encodeWithSignature(
                 "initialize(address,string,string,address,uint256)",
                 address(VIRTUAL),
@@ -57,14 +65,47 @@ contract AgentFactory is Ownable {
                 GRAD_THRESHOLD
             )
         );
-        require(success, "init failed");
+        if (!success) {
+            if (returnData.length > 0) {
+                assembly {
+                    let returndata_size := mload(returnData)
+                    revert(add(32, returnData), returndata_size)
+                }
+            } else {
+                revert("init failed");
+            }
+        }
+
+        // Set Uniswap router
+        (bool routerSuccess, bytes memory routerReturnData) = curve.call(
+            abi.encodeWithSignature("setUniswapRouter(address)", uniswapRouter)
+        );
+        if (!routerSuccess) {
+            if (routerReturnData.length > 0) {
+                assembly {
+                    let returndata_size := mload(routerReturnData)
+                    revert(add(32, routerReturnData), returndata_size)
+                }
+            } else {
+                revert("router set failed");
+            }
+        }
 
         // Approve and make initial buy
         VIRTUAL.approve(curve, deposit);
-        (bool buySuccess,) = curve.call(
+        (bool buySuccess, bytes memory buyReturnData) = curve.call(
             abi.encodeWithSignature("buy(uint256,uint256)", deposit, 0)
         );
-        require(buySuccess, "buy failed");
+        if (!buySuccess) {
+            if (buyReturnData.length > 0) {
+                assembly {
+                    let returndata_size := mload(buyReturnData)
+                    revert(add(32, buyReturnData), returndata_size)
+                }
+            } else {
+                revert("buy failed");
+            }
+        }
 
         agents.push(curve);
         emit AgentCreated(curve, msg.sender, name, symbol);
@@ -76,21 +117,5 @@ contract AgentFactory is Ownable {
 
     function agentCount() external view returns (uint256) {
         return agents.length;
-    }
-
-    // Create minimal proxy using EIP-1167
-    function _createProxy(address implementation) internal returns (address proxy) {
-        bytes memory bytecode = abi.encodePacked(
-            hex"3d602d80600a3d3981f3363d3d373d3d3d363d73",
-            implementation,
-            hex"5af43d82803e903d91602b57fd5bf3"
-        );
-        
-        bytes32 salt = keccak256(abi.encodePacked(msg.sender, block.timestamp, agents.length));
-        
-        assembly {
-            proxy := create2(0, add(bytecode, 0x20), mload(bytecode), salt)
-        }
-        require(proxy != address(0), "proxy creation failed");
     }
 }

@@ -109,6 +109,10 @@ describe("BondingCurve", function () {
         creator.address,
         GRADUATION_THRESHOLD
       );
+
+      // Set Uniswap router for graduation functionality
+      const uniswapRouter = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D";
+      await bondingCurve.setUniswapRouter(uniswapRouter);
     });
 
     it("Should buy tokens successfully", async function () {
@@ -277,6 +281,10 @@ describe("BondingCurve", function () {
         creator.address,
         GRADUATION_THRESHOLD
       );
+
+      // Set Uniswap router for graduation functionality
+      const uniswapRouter = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D";
+      await bondingCurve.setUniswapRouter(uniswapRouter);
     });
 
     it("Should graduate when threshold is reached", async function () {
@@ -308,7 +316,8 @@ describe("BondingCurve", function () {
 
       const eToken = await ethers.getContractAt("AgentTokenExternal", eTokenAddress);
       expect(await eToken.totalSupply()).to.equal(SUPPLY);
-      expect(await eToken.balanceOf(await bondingCurve.getAddress())).to.equal(SUPPLY);
+      // After graduation, 50% of tokens go to liquidity, so bonding curve holds 50%
+      expect(await eToken.balanceOf(await bondingCurve.getAddress())).to.equal(SUPPLY / 2n);
 
       // Check token metadata
       const iTokenAddress = await bondingCurve.iToken();
@@ -341,6 +350,10 @@ describe("BondingCurve", function () {
         creator.address,
         GRADUATION_THRESHOLD
       );
+
+      // Set Uniswap router for graduation functionality
+      const uniswapRouter = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D";
+      await bondingCurve.setUniswapRouter(uniswapRouter);
 
       // Buy enough to graduate
       const buyAmount = GRADUATION_THRESHOLD + ethers.parseEther("1000");
@@ -466,6 +479,10 @@ describe("BondingCurve", function () {
         creator.address,
         GRADUATION_THRESHOLD
       );
+
+      // Set Uniswap router for graduation functionality
+      const uniswapRouter = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D";
+      await bondingCurve.setUniswapRouter(uniswapRouter);
     });
 
     it("Should handle very small purchases", async function () {

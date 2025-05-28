@@ -38,6 +38,10 @@ describe("Integration Tests", function () {
     // Set bonding curve implementation
     await agentFactory.setBondingCurveImplementation(await bondingCurveImplementation.getAddress());
 
+    // Set Uniswap router (use mainnet address since we're forking)
+    const uniswapRouter = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D";
+    await agentFactory.setUniswapRouter(uniswapRouter);
+
     // Distribute EasyV tokens
     await easyV.transfer(creator.address, ethers.parseEther("100000"));
     await easyV.transfer(buyer1.address, ethers.parseEther("100000"));
@@ -179,6 +183,14 @@ describe("Integration Tests", function () {
       const totalInternalSupply = await iToken.totalSupply();
       const totalExternalSupply = await eToken.totalSupply();
       expect(totalExternalSupply).to.equal(ethers.parseEther("1000000000")); // 1B tokens
+
+      // Bonding curve should have fewer external tokens
+      const bondingCurveExternalBalance = await eToken.balanceOf(await bondingCurve.getAddress());
+      // After graduation, bonding curve starts with 50% of supply, then loses redeemed tokens
+      // Total redeemed = buyer1's full balance + buyer2's half balance
+      const totalRedeemed = buyer1InternalBalance + redeemAmount;
+      const expectedBondingCurveBalance = (totalExternalSupply / 2n) - totalRedeemed;
+      expect(bondingCurveExternalBalance).to.equal(expectedBondingCurveBalance);
 
       console.log("✅ Complete lifecycle test passed!");
     });
@@ -374,7 +386,9 @@ describe("Integration Tests", function () {
 
       // Bonding curve should have fewer external tokens
       const bondingCurveExternalBalance = await eToken.balanceOf(await bondingCurve.getAddress());
-      expect(bondingCurveExternalBalance).to.equal(initialExternalSupply - redeemAmount);
+      // After graduation, bonding curve starts with 50% of supply, then loses redeemed tokens
+      const expectedBondingCurveBalance = (initialExternalSupply / 2n) - redeemAmount;
+      expect(bondingCurveExternalBalance).to.equal(expectedBondingCurveBalance);
     });
   });
 

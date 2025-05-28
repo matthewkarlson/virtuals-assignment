@@ -36,6 +36,10 @@ describe("AgentFactory", function () {
     // Set bonding curve implementation
     await agentFactory.setBondingCurveImplementation(await bondingCurveImplementation.getAddress());
 
+    // Set Uniswap router (use mainnet address since we're forking)
+    const uniswapRouter = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D";
+    await agentFactory.setUniswapRouter(uniswapRouter);
+
     // Transfer some EasyV to creator
     await easyV.transfer(creator.address, ethers.parseEther("50000"));
   });

@@ -7,13 +7,16 @@ import {ReentrancyGuard}    from "@openzeppelin/contracts/utils/ReentrancyGuard.
 
 import {AgentTokenInternal} from "./AgentTokenInternal.sol";
 import {AgentTokenExternal} from "./AgentTokenExternal.sol";
+import {IUniswapV2Factory}  from "./interfaces/IUniswapV2Factory.sol";
+import {IUniswapV2Router02} from "./interfaces/IUniswapV2Router02.sol";
+import {IUniswapV2Pair}     from "./interfaces/IUniswapV2Pair.sol";
 
 /**
  * @title BondingCurve
  * @notice Linear bonding curve MVP. Users purchase an internal token with
  *         EasyV. When `virtualRaised` ≥ `GRADUATION_THRESHOLD`, mint an
- *         external ERC‑20 and allow 1 : 1 redemptions. *No* sell‑back path is
- *         implemented to keep the MVP simple.
+ *         external ERC‑20, create a Uniswap V2 pair, and add liquidity.
+ *         After graduation, users can redeem internal tokens 1:1 for external tokens.
  */
 contract BondingCurve is ReentrancyGuard {
     using SafeERC20 for IERC20;
@@ -28,6 +31,11 @@ contract BondingCurve is ReentrancyGuard {
     address public creator;         // agent creator / first buyer
     uint256 public GRADUATION_THRESHOLD; // amount of VIRTUAL to raise
     uint256 public K;               // slope constant for P(s) = K·s
+
+    // Uniswap V2 integration
+    IUniswapV2Router02 public uniswapRouter;
+    IUniswapV2Factory  public uniswapFactory;
+    address public uniswapPair;     // created upon graduation
 
     AgentTokenInternal public iToken; // internal token
     AgentTokenExternal public eToken; // external token (set on grad.)
@@ -46,7 +54,7 @@ contract BondingCurve is ReentrancyGuard {
     // ---------------------------------------------------------------------
 
     event Buy(address indexed buyer, uint256 virtualIn, uint256 tokensOut);
-    event Graduate(address externalToken);
+    event Graduate(address externalToken, address uniswapPair, uint256 liquidityTokens);
     event Redeem(address indexed user, uint256 amount);
 
     // ---------------------------------------------------------------------
@@ -79,6 +87,17 @@ contract BondingCurve is ReentrancyGuard {
         );
         
         initialized = true;
+    }
+
+    // ---------------------------------------------------------------------
+    // Configuration functions (called by factory)
+    // ---------------------------------------------------------------------
+
+    function setUniswapRouter(address _router) external {
+        require(!graduated, "already graduated");
+        require(_router != address(0), "invalid router");
+        uniswapRouter = IUniswapV2Router02(_router);
+        uniswapFactory = IUniswapV2Factory(uniswapRouter.factory());
     }
 
     // ---------------------------------------------------------------------
@@ -138,9 +157,42 @@ contract BondingCurve is ReentrancyGuard {
     // ---------------------------------------------------------------------
 
     function _graduate() internal {
+        require(address(uniswapRouter) != address(0), "router not set");
+        
         graduated = true;
-        eToken = new AgentTokenExternal(iToken.name(), iToken.symbol(), address(this), SUPPLY);
-        emit Graduate(address(eToken));
+        
+        // Deploy external token
+        eToken = new AgentTokenExternal(
+            iToken.name(), 
+            iToken.symbol(), 
+            address(this), 
+            SUPPLY
+        );
+
+        // Create Uniswap V2 pair
+        uniswapPair = uniswapFactory.createPair(address(eToken), address(VIRTUAL));
+
+        // Calculate liquidity amounts
+        uint256 tokenLiquidity = SUPPLY / 2; // 50% of total supply for liquidity
+        uint256 virtualLiquidity = virtualRaised; // All raised VIRTUAL goes to liquidity
+
+        // Approve router to spend tokens
+        eToken.approve(address(uniswapRouter), tokenLiquidity);
+        VIRTUAL.approve(address(uniswapRouter), virtualLiquidity);
+
+        // Add liquidity to Uniswap V2
+        (, , uint256 liquidityTokens) = uniswapRouter.addLiquidity(
+            address(eToken),
+            address(VIRTUAL),
+            tokenLiquidity,
+            virtualLiquidity,
+            0, // Accept any amount of tokens
+            0, // Accept any amount of VIRTUAL
+            creator, // LP tokens go to creator
+            block.timestamp + 300 // 5 minute deadline
+        );
+
+        emit Graduate(address(eToken), uniswapPair, liquidityTokens);
     }
 
     function _sqrt(uint256 y) internal pure returns (uint256 z) {
