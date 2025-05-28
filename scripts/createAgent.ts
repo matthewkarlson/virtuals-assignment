@@ -4,8 +4,8 @@ async function main() {
   console.log("🤖 Creating a new agent...");
 
   // Deployed contract addresses from the successful deployment
-  const EASYV_ADDRESS = "0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6";
-  const AGENT_FACTORY_ADDRESS = "0x8A791620dd6260079BF849Dc5567aDC3F2FdC318";
+  const EASYV_ADDRESS = "0x43F48c3DC6df4674219923F2d4f8880d5E3CCC4c";
+  const AGENT_FACTORY_ADDRESS = "0x512F94E0a875516da53e2e59aC1995d6B2fbF781";
 
   const [deployer] = await ethers.getSigners();
   console.log("Creating agent with account:", deployer.address);
@@ -54,25 +54,27 @@ async function main() {
       }
     }
   );
-  
+
   if (agentCreatedEvent) {
     const parsed = agentFactory.interface.parseLog(agentCreatedEvent);
-    const [curveAddress, creator, name, symbol] = parsed!.args;
+    const bondingCurveAddress = parsed!.args[0];
+    const creator = parsed!.args[1];
+    const name = parsed!.args[2];
+    const symbol = parsed!.args[3];
+
     console.log("📊 Agent Details:");
-    console.log("- Bonding Curve Address:", curveAddress);
-    console.log("- Creator:", creator);
-    console.log("- Name:", name);
-    console.log("- Symbol:", symbol);
-    
-    // Get bonding curve instance
-    const bondingCurve = await ethers.getContractAt("BondingCurve", curveAddress);
-    const tokensSold = await bondingCurve.tokensSold();
+    console.log("  Name:", name);
+    console.log("  Symbol:", symbol);
+    console.log("  Creator:", creator);
+    console.log("  Bonding Curve:", bondingCurveAddress);
+
+    // Get bonding curve details
+    const bondingCurve = await ethers.getContractAt("BondingCurve", bondingCurveAddress);
     const virtualRaised = await bondingCurve.virtualRaised();
-    const graduated = await bondingCurve.graduated();
+    const tokensSold = await bondingCurve.tokensSold();
     
-    console.log("- Tokens Sold:", ethers.formatEther(tokensSold));
-    console.log("- Virtual Raised:", ethers.formatEther(virtualRaised));
-    console.log("- Graduated:", graduated);
+    console.log("  Virtual Raised:", ethers.formatEther(virtualRaised));
+    console.log("  Tokens Sold:", ethers.formatEther(tokensSold));
   }
 }
 

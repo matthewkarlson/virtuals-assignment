@@ -1,192 +1,104 @@
 import { ethers } from "hardhat";
 
 async function main() {
-  console.log("🎓 Testing Agent Graduation and Redemption Flow...");
+  console.log("🎓 Testing agent graduation...");
 
-  // Deployed contract addresses
-  const EASYV_ADDRESS = "0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6";
-  const AGENT_FACTORY_ADDRESS = "0x8A791620dd6260079BF849Dc5567aDC3F2FdC318";
-  
-  // The bonding curve address from our previous agent creation
-  const BONDING_CURVE_ADDRESS = "0x3Ef81EaED45a2ee5c3416f0E52781Cf0248CC625";
+  // Deployed contract addresses from the successful deployment
+  const EASYV_ADDRESS = "0x43F48c3DC6df4674219923F2d4f8880d5E3CCC4c";
+  const AGENT_FACTORY_ADDRESS = "0x512F94E0a875516da53e2e59aC1995d6B2fbF781";
 
-  const [deployer, buyer1, buyer2] = await ethers.getSigners();
-  console.log("Testing with accounts:");
-  console.log("- Deployer:", deployer.address);
-  console.log("- Buyer 1:", buyer1.address);
-  console.log("- Buyer 2:", buyer2.address);
+  const [deployer] = await ethers.getSigners();
+  console.log("Testing with account:", deployer.address);
 
   // Get contract instances
   const easyV = await ethers.getContractAt("EasyV", EASYV_ADDRESS);
   const agentFactory = await ethers.getContractAt("AgentFactory", AGENT_FACTORY_ADDRESS);
-  const bondingCurve = await ethers.getContractAt("BondingCurve", BONDING_CURVE_ADDRESS);
 
-  // Check graduation threshold
-  const gradThreshold = await bondingCurve.GRADUATION_THRESHOLD();
-  console.log("\n📊 Graduation Threshold:", ethers.formatEther(gradThreshold), "EasyV");
+  // Check if there are any agents
+  const agentCount = await agentFactory.agentCount();
+  console.log("Total agents:", agentCount.toString());
 
-  // Check current state
-  let virtualRaised = await bondingCurve.virtualRaised();
-  let tokensSold = await bondingCurve.tokensSold();
-  let graduated = await bondingCurve.graduated();
-  
-  console.log("\n📈 Current State:");
-  console.log("- Virtual Raised:", ethers.formatEther(virtualRaised), "EasyV");
-  console.log("- Tokens Sold:", ethers.formatEther(tokensSold));
-  console.log("- Graduated:", graduated);
-  console.log("- Remaining to graduate:", ethers.formatEther(gradThreshold - virtualRaised), "EasyV");
-
-  if (graduated) {
-    console.log("✅ Agent already graduated! Skipping to redemption test...");
-  } else {
-    // Transfer some EasyV to other accounts for testing
-    console.log("\n💰 Distributing EasyV to test accounts...");
-    const transferAmount = ethers.parseEther("20000");
+  if (agentCount === 0n) {
+    console.log("No agents found. Creating one first...");
     
-    await easyV.transfer(buyer1.address, transferAmount);
-    await easyV.transfer(buyer2.address, transferAmount);
+    const minDeposit = await agentFactory.MIN_INITIAL_DEPOSIT();
+    const balance = await easyV.balanceOf(deployer.address);
     
-    console.log("✅ Transferred", ethers.formatEther(transferAmount), "EasyV to each buyer");
-
-    // Calculate how much more we need to buy to reach graduation
-    const remainingToGrad = gradThreshold - virtualRaised;
-    const buyAmount1 = remainingToGrad / 2n; // Split between two buyers
-    const buyAmount2 = remainingToGrad - buyAmount1 + ethers.parseEther("1000"); // Add extra to ensure graduation
-
-    console.log("\n🛒 Buying tokens to trigger graduation...");
-    
-    // Buyer 1 buys tokens
-    console.log("👤 Buyer 1 purchasing", ethers.formatEther(buyAmount1), "EasyV worth of tokens...");
-    await easyV.connect(buyer1).approve(BONDING_CURVE_ADDRESS, buyAmount1);
-    const buy1Tx = await bondingCurve.connect(buyer1).buy(buyAmount1, 0);
-    const buy1Receipt = await buy1Tx.wait();
-    
-    // Find Buy event
-    const buy1Event = buy1Receipt?.logs.find((log: any) => {
-      try {
-        const parsed = bondingCurve.interface.parseLog(log);
-        return parsed?.name === "Buy";
-      } catch {
-        return false;
-      }
-    });
-    
-    if (buy1Event) {
-      const parsed = bondingCurve.interface.parseLog(buy1Event);
-      const [buyer, virtualIn, tokensOut] = parsed!.args;
-      console.log("✅ Buyer 1 received", ethers.formatEther(tokensOut), "tokens for", ethers.formatEther(virtualIn), "EasyV");
+    if (balance < minDeposit) {
+      console.error("❌ Insufficient EasyV balance to create agent");
+      return;
     }
 
-    // Check if graduated after first buy
-    graduated = await bondingCurve.graduated();
-    virtualRaised = await bondingCurve.virtualRaised();
-    
-    console.log("📊 After Buyer 1 purchase:");
-    console.log("- Virtual Raised:", ethers.formatEther(virtualRaised), "EasyV");
-    console.log("- Graduated:", graduated);
-
-    if (!graduated) {
-      // Buyer 2 buys tokens to trigger graduation
-      console.log("\n👤 Buyer 2 purchasing", ethers.formatEther(buyAmount2), "EasyV worth of tokens...");
-      await easyV.connect(buyer2).approve(BONDING_CURVE_ADDRESS, buyAmount2);
-      const buy2Tx = await bondingCurve.connect(buyer2).buy(buyAmount2, 0);
-      const buy2Receipt = await buy2Tx.wait();
-      
-      // Check for Graduate event
-      const graduateEvent = buy2Receipt?.logs.find((log: any) => {
-        try {
-          const parsed = bondingCurve.interface.parseLog(log);
-          return parsed?.name === "Graduate";
-        } catch {
-          return false;
-        }
-      });
-      
-      if (graduateEvent) {
-        const parsed = bondingCurve.interface.parseLog(graduateEvent);
-        const [externalTokenAddress] = parsed!.args;
-        console.log("🎓 GRADUATION TRIGGERED!");
-        console.log("✅ External token deployed at:", externalTokenAddress);
-      }
-    }
+    // Approve and create agent
+    await easyV.approve(AGENT_FACTORY_ADDRESS, minDeposit);
+    const createTx = await agentFactory.createAgent("Test Agent", "TEST", minDeposit);
+    await createTx.wait();
+    console.log("✅ Agent created");
   }
 
-  // Final state check
-  virtualRaised = await bondingCurve.virtualRaised();
-  tokensSold = await bondingCurve.tokensSold();
-  graduated = await bondingCurve.graduated();
-  
-  console.log("\n🎯 Final State:");
-  console.log("- Virtual Raised:", ethers.formatEther(virtualRaised), "EasyV");
-  console.log("- Tokens Sold:", ethers.formatEther(tokensSold));
-  console.log("- Graduated:", graduated);
+  // Get the first agent
+  const bondingCurveAddress = await agentFactory.agents(0);
+  console.log("Testing with bonding curve:", bondingCurveAddress);
+
+  const bondingCurve = await ethers.getContractAt("BondingCurve", bondingCurveAddress);
+
+  // Check current state
+  const virtualRaised = await bondingCurve.virtualRaised();
+  const graduationThreshold = await bondingCurve.GRADUATION_THRESHOLD();
+  const graduated = await bondingCurve.graduated();
+
+  console.log("Current virtual raised:", ethers.formatEther(virtualRaised));
+  console.log("Graduation threshold:", ethers.formatEther(graduationThreshold));
+  console.log("Already graduated:", graduated);
 
   if (graduated) {
-    console.log("\n🔄 Testing Redemption Process...");
+    console.log("✅ Agent already graduated!");
+    return;
+  }
+
+  // Calculate how much more we need to buy
+  const needed = graduationThreshold - virtualRaised;
+  console.log("Need to buy:", ethers.formatEther(needed), "more EasyV worth of tokens");
+
+  // Check if we have enough balance
+  const balance = await easyV.balanceOf(deployer.address);
+  console.log("Available balance:", ethers.formatEther(balance));
+
+  if (balance < needed) {
+    console.error("❌ Insufficient balance to trigger graduation");
+    console.log("Need:", ethers.formatEther(needed));
+    console.log("Have:", ethers.formatEther(balance));
+    return;
+  }
+
+  // Approve bonding curve to spend our tokens
+  console.log("📝 Approving EasyV spend...");
+  await easyV.approve(bondingCurveAddress, needed);
+
+  // Buy tokens to trigger graduation
+  console.log("🚀 Buying tokens to trigger graduation...");
+  const buyTx = await bondingCurve.buy(needed, 0); // 0 min tokens out
+  const receipt = await buyTx.wait();
+
+  console.log("✅ Purchase completed!");
+
+  // Check if graduated
+  const newGraduated = await bondingCurve.graduated();
+  if (newGraduated) {
+    console.log("🎓 Agent graduated!");
     
     // Get external token address
     const externalTokenAddress = await bondingCurve.eToken();
-    const externalToken = await ethers.getContractAt("AgentTokenExternal", externalTokenAddress);
-    const internalToken = await bondingCurve.iToken();
-    const internalTokenContract = await ethers.getContractAt("AgentTokenInternal", internalToken);
+    console.log("External token address:", externalTokenAddress);
     
-    console.log("📋 Token Addresses:");
-    console.log("- Internal Token:", internalToken);
-    console.log("- External Token:", externalTokenAddress);
-    
-    // Check balances before redemption
-    const buyer1InternalBalance = await internalTokenContract.balanceOf(buyer1.address);
-    const buyer1ExternalBalance = await externalToken.balanceOf(buyer1.address);
-    
-    console.log("\n💼 Buyer 1 Balances Before Redemption:");
-    console.log("- Internal Tokens:", ethers.formatEther(buyer1InternalBalance));
-    console.log("- External Tokens:", ethers.formatEther(buyer1ExternalBalance));
-    
-    if (buyer1InternalBalance > 0) {
-      // Redeem half of internal tokens
-      const redeemAmount = buyer1InternalBalance / 2n;
-      console.log("\n🔄 Buyer 1 redeeming", ethers.formatEther(redeemAmount), "internal tokens...");
-      
-      // Approve bonding curve to burn internal tokens
-      await internalTokenContract.connect(buyer1).approve(BONDING_CURVE_ADDRESS, redeemAmount);
-      
-      const redeemTx = await bondingCurve.connect(buyer1).redeem(redeemAmount);
-      const redeemReceipt = await redeemTx.wait();
-      
-      // Check for Redeem event
-      const redeemEvent = redeemReceipt?.logs.find((log: any) => {
-        try {
-          const parsed = bondingCurve.interface.parseLog(log);
-          return parsed?.name === "Redeem";
-        } catch {
-          return false;
-        }
-      });
-      
-      if (redeemEvent) {
-        const parsed = bondingCurve.interface.parseLog(redeemEvent);
-        const [user, amount] = parsed!.args;
-        console.log("✅ Redemption successful!");
-        console.log("- User:", user);
-        console.log("- Amount:", ethers.formatEther(amount));
-      }
-      
-      // Check balances after redemption
-      const buyer1InternalBalanceAfter = await internalTokenContract.balanceOf(buyer1.address);
-      const buyer1ExternalBalanceAfter = await externalToken.balanceOf(buyer1.address);
-      
-      console.log("\n💼 Buyer 1 Balances After Redemption:");
-      console.log("- Internal Tokens:", ethers.formatEther(buyer1InternalBalanceAfter));
-      console.log("- External Tokens:", ethers.formatEther(buyer1ExternalBalanceAfter));
-      console.log("- Redeemed Amount:", ethers.formatEther(buyer1ExternalBalanceAfter - buyer1ExternalBalance));
-    } else {
-      console.log("❌ Buyer 1 has no internal tokens to redeem");
-    }
+    // Get Uniswap pair address
+    const uniswapPair = await bondingCurve.uniswapPair();
+    console.log("Uniswap pair address:", uniswapPair);
   } else {
-    console.log("❌ Agent has not graduated yet. Cannot test redemption.");
+    console.log("❌ Graduation not triggered yet");
+    const newVirtualRaised = await bondingCurve.virtualRaised();
+    console.log("New virtual raised:", ethers.formatEther(newVirtualRaised));
   }
-
-  console.log("\n🎉 Graduation and Redemption Test Complete!");
 }
 
 main()

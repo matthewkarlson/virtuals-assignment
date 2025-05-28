@@ -1,5 +1,6 @@
 import { HardhatUserConfig } from "hardhat/config";
 import "@nomicfoundation/hardhat-toolbox";
+import "@typechain/hardhat";
 require("dotenv").config();
 
 const config: HardhatUserConfig = {
@@ -16,9 +17,17 @@ const config: HardhatUserConfig = {
     hardhat: {
       forking: {
         url: `https://eth-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`,
+        blockNumber: 22582248,
       }
     }
-  }
+  },
+  typechain: {
+    outDir: "typechain-types",
+    target: "ethers-v6",
+    alwaysGenerateOverloads: false,
+    externalArtifacts: ["externalArtifacts/*.json"],
+    dontOverrideCompile: false,
+  },
 };
 
 export default config;

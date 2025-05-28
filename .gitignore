@@ -9,6 +9,9 @@ node_modules
 /typechain
 /typechain-types
 
+# Generated ABIs for frontend
+/virtuals-ui/src/lib/abis
+
 # solidity-coverage files
 /coverage
 /coverage.json
