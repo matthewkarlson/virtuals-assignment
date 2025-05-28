@@ -1,0 +1,221 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Protocol Economics & Tokenomics Guide
+
+## Economic Architecture Overview
+
+The Virtual Protocol implements a sophisticated multi-token economic system designed to incentivize participation across all ecosystem roles.
+
+## Token Types & Functions
+
+### VIRTUAL Token
+**Purpose**: Protocol governance and utility token
+**Functions**:
+- Governance voting power
+- Application fees for agent creation
+- Staking for protocol rewards
+- Treasury funding mechanism
+
+### Agent Tokens
+**Purpose**: Individual AI agent representation and trading
+**Functions**:
+- Agent-specific governance
+- Trading on bonding curves and AMMs
+- Reward distribution basis
+- Community ownership representation
+
+### veTokens (Voting Escrow)
+**Purpose**: Governance participation and long-term alignment
+**Functions**:
+- Time-weighted voting power
+- Delegation to validators
+- Staking reward multipliers
+- Governance proposal rights
+
+### LP Tokens
+**Purpose**: Liquidity provision rewards
+**Functions**:
+- Uniswap V2 liquidity representation
+- Staking for additional rewards
+- Fee sharing from trading activity
+
+## Bonding Curve Economics
+
+### Price Discovery Mechanism
+**Reference**: [contracts/BondingCurve.sol](mdc:contracts/BondingCurve.sol)
+
+The bonding curve uses a mathematical formula for automatic price discovery:
+
+```solidity
+uint256 public constant K = 3_000_000_000_000; // Bonding curve parameter
+```
+
+### Key Economic Properties
+1. **Continuous Liquidity** - Always available for trading
+2. **Price Appreciation** - Price increases with each purchase
+3. **Early Adopter Benefits** - Lower prices for early supporters
+4. **Automatic Market Making** - No need for external liquidity providers
+
+### Graduation Threshold
+- Agents graduate to Uniswap when bonding curve reserves hit threshold
+- Liquidity migrates automatically
+- Price continuity maintained during transition
+
+## Reward Distribution System
+
+### Multi-Tier Rewards
+**Reference**: [README.md](mdc:README.md) - Reward Distribution section
+
+1. **Protocol Rewards** - Platform treasury funding
+2. **Staker Rewards** - LP token stakers
+3. **Validator Rewards** - Governance participants
+4. **Contributor Rewards** - Service/contribution providers
+
+### Reward Calculation Factors
+- Staked amount proportion
+- Validator uptime and participation
+- Historical delegation patterns
+- Contribution impact scores
+
+### Distribution Mechanics
+- Periodic reward distributions
+- Claimable reward accumulation
+- Automatic compounding options
+- Delegation-based distribution
+
+## Governance Economics
+
+### Agent DAO Structure
+Each agent has its own governance system with:
+- Proposal creation rights
+- Voting mechanisms
+- Execution thresholds
+- Validator scoring systems
+
+### Voting Power Calculation
+- Based on veToken holdings
+- Time-weighted for long-term alignment
+- Delegation mechanisms for participation
+- Decay mechanics for inactive positions
+
+### Governance Incentives
+- Validator rewards for participation
+- Proposal creation requirements
+- Execution bonuses for successful proposals
+- Penalty mechanisms for malicious behavior
+
+## Fee Structure & Revenue Streams
+
+### Trading Fees
+- Bonding curve buy/sell fees
+- AMM trading fees (Uniswap V2)
+- Protocol fees on all transactions
+
+### Application Fees
+- Agent proposal fees in VIRTUAL tokens
+- Threshold requirements for quality control
+- Fee redistribution to stakeholders
+
+### Service Fees
+- Contribution marketplace fees
+- Service provider commissions
+- Platform usage fees
+
+## Staking Mechanisms
+
+### LP Token Staking
+**Benefits**:
+- Reward token distribution
+- Governance voting power
+- Fee sharing from trading
+- Protocol development funding
+
+### VIRTUAL Token Staking
+**Benefits**:
+- Protocol governance rights
+- Reward multipliers
+- Early access to new features
+- Treasury yield sharing
+
+### veToken Mechanics
+**Features**:
+- Time-locked staking positions
+- Voting power based on lock duration
+- Auto-renewal options
+- Delegation to active validators
+
+## Economic Security
+
+### Incentive Alignment
+- Long-term staking rewards
+- Validator performance tracking
+- Contribution quality scoring
+- Community-driven governance
+
+### Risk Mitigation
+- Diversified revenue streams
+- Gradual token release schedules
+- Emergency pause mechanisms
+- Multi-signature treasury controls
+
+### Sustainability Measures
+- Fee-based revenue model
+- Treasury management protocols
+- Inflation control mechanisms
+- Value accrual to token holders
+
+## Token Flow Diagrams
+
+### Agent Creation Flow
+1. User pays VIRTUAL tokens for application
+2. Community votes on proposal
+3. Successful agents receive initial funding
+4. Bonding curve launches with initial liquidity
+
+### Trading Flow
+1. Users buy/sell on bonding curve
+2. Fees collected and distributed
+3. Graduation triggers AMM migration
+4. Continued trading on Uniswap with fees
+
+### Reward Flow
+1. Protocol generates fees from activity
+2. Rewards distributed to stakeholders
+3. Stakers claim accumulated rewards
+4. Validators receive participation bonuses
+
+## Economic Parameters
+
+### Key Constants
+- Bonding curve parameter K
+- Graduation thresholds
+- Fee percentages
+- Reward distribution ratios
+- Staking lock periods
+
+### Governance-Controlled Parameters
+- Fee rates and distribution
+- Reward allocation percentages
+- Staking requirements
+- Proposal thresholds
+- Validator requirements
+
+## Integration with External Protocols
+
+### Uniswap V2 Integration
+**Reference**: [UNISWAP_INTEGRATION.md](mdc:UNISWAP_INTEGRATION.md)
+- Automatic liquidity migration
+- Fee sharing mechanisms
+- Price oracle integration
+- Slippage protection
+
+### Cross-Protocol Composability
+- DeFi protocol integrations
+- Yield farming opportunities
+- Liquidity mining programs
+- Cross-chain bridge support
+
+This economic system creates a self-sustaining ecosystem where all participants are incentivized to contribute to the growth and success of the Virtual Protocol platform.

@@ -31,7 +31,7 @@ contract BondingCurve is ReentrancyGuard {
     address public creator;         // agent creator / first buyer
     uint256 public GRADUATION_THRESHOLD; // amount of VIRTUAL to raise
     uint256 public K;               // slope constant for P(s) = K·s
-
+    uint256 public constant PRECISION = 1e18;
     // Uniswap V2 integration
     IUniswapV2Router02 public uniswapRouter;
     IUniswapV2Factory  public uniswapFactory;
@@ -73,9 +73,7 @@ contract BondingCurve is ReentrancyGuard {
         
         VIRTUAL = IERC20(_virtual);
         GRADUATION_THRESHOLD = _threshold;
-        // Fix K calculation to avoid zero: K = (2 * threshold * 1e18) / (SUPPLY^2)
-        // This ensures K > 0 and maintains proper scaling
-        K = (2 * _threshold * 1e18) / (SUPPLY * SUPPLY / 1e18);
+        K = 2; // Back to 2, using multiplier in formula instead
         creator = _creator;
 
         // Deploy internal token; BondingCurve contract holds entire supply
@@ -121,7 +119,7 @@ contract BondingCurve is ReentrancyGuard {
 
         // Invert area‑under‑curve to solve for Δs
         uint256 s  = tokensSold;
-        uint256 radicand = (2 * virtualIn) / K + s * s;
+        uint256 radicand = (2 * virtualIn * PRECISION * 10000000) / K + s * s; // Multiply by 1M to get ~1000 tokens per VIRTUAL
         uint256 newS = _sqrt(radicand);
         tokenOut = newS - s;
         require(tokenOut >= minTokensOut, "slip");
@@ -171,26 +169,39 @@ contract BondingCurve is ReentrancyGuard {
 
         // Create Uniswap V2 pair
         uniswapPair = uniswapFactory.createPair(address(eToken), address(VIRTUAL));
+        require(uniswapPair != address(0), "pair creation failed");
 
-        // Calculate liquidity amounts
-        uint256 tokenLiquidity = SUPPLY / 2; // 50% of total supply for liquidity
+        // Calculate liquidity amounts correctly:
+        // - tokensSold: amount of tokens that users can redeem (must be reserved)
+        // - remaining tokens: can go to liquidity
+        uint256 tokensForRedemption = tokensSold;
+        uint256 tokensForLiquidity = SUPPLY - tokensForRedemption;
         uint256 virtualLiquidity = virtualRaised; // All raised VIRTUAL goes to liquidity
 
-        // Approve router to spend tokens
-        eToken.approve(address(uniswapRouter), tokenLiquidity);
+        require(tokensForLiquidity > 0, "no tokens for liquidity");
+        require(virtualLiquidity > 0, "no virtual for liquidity");
+
+        // Approve router to spend tokens for liquidity
+        eToken.approve(address(uniswapRouter), tokensForLiquidity);
         VIRTUAL.approve(address(uniswapRouter), virtualLiquidity);
 
         // Add liquidity to Uniswap V2
         (, , uint256 liquidityTokens) = uniswapRouter.addLiquidity(
             address(eToken),
             address(VIRTUAL),
-            tokenLiquidity,
+            tokensForLiquidity,
             virtualLiquidity,
             0, // Accept any amount of tokens
             0, // Accept any amount of VIRTUAL
             creator, // LP tokens go to creator
             block.timestamp + 300 // 5 minute deadline
         );
+
+        require(liquidityTokens > 0, "liquidity addition failed");
+
+        // After liquidity is added, the bonding curve should have:
+        // SUPPLY - tokensForLiquidity = tokensForRedemption
+        // This ensures all internal tokens can be redeemed 1:1
 
         emit Graduate(address(eToken), uniswapPair, liquidityTokens);
     }

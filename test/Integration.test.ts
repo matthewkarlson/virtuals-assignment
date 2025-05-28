@@ -186,10 +186,11 @@ describe("Integration Tests", function () {
 
       // Bonding curve should have fewer external tokens
       const bondingCurveExternalBalance = await eToken.balanceOf(await bondingCurve.getAddress());
-      // After graduation, bonding curve starts with 50% of supply, then loses redeemed tokens
-      // Total redeemed = buyer1's full balance + buyer2's half balance
-      const totalRedeemed = buyer1InternalBalance + redeemAmount;
-      const expectedBondingCurveBalance = (totalExternalSupply / 2n) - totalRedeemed;
+      // CORRECT: After graduation, bonding curve reserves exactly tokensSold for redemption
+      // Then loses redeemed tokens: tokensSold - totalRedeemed
+      const tokensSold = await bondingCurve.tokensSold();
+      const totalRedeemed = buyer1InternalBalance + redeemAmount; // buyer1 redeemed all, buyer2 redeemed half
+      const expectedBondingCurveBalance = tokensSold - totalRedeemed;
       expect(bondingCurveExternalBalance).to.equal(expectedBondingCurveBalance);
 
       console.log("✅ Complete lifecycle test passed!");
@@ -314,7 +315,7 @@ describe("Integration Tests", function () {
 
       console.log("Token amounts received for equal EasyV purchases:");
       purchases.forEach((amount, i) => {
-        console.log(`Purchase ${i + 1}: ${ethers.formatEther(amount)} tokens`);
+        console.log(`Purchase ${i + 1}: ${amount.toString()} wei (${ethers.formatEther(amount)} ether) (${ethers.formatUnits(amount, 6)} with 6 decimals)`);
       });
     });
 
@@ -386,8 +387,11 @@ describe("Integration Tests", function () {
 
       // Bonding curve should have fewer external tokens
       const bondingCurveExternalBalance = await eToken.balanceOf(await bondingCurve.getAddress());
-      // After graduation, bonding curve starts with 50% of supply, then loses redeemed tokens
-      const expectedBondingCurveBalance = (initialExternalSupply / 2n) - redeemAmount;
+      // CORRECT: After graduation, bonding curve reserves exactly tokensSold for redemption
+      // Then loses redeemed tokens: tokensSold - totalRedeemed
+      const tokensSold = await bondingCurve.tokensSold();
+      const totalRedeemed = redeemAmount; // Only buyer1 redeemed, and only redeemAmount
+      const expectedBondingCurveBalance = tokensSold - totalRedeemed;
       expect(bondingCurveExternalBalance).to.equal(expectedBondingCurveBalance);
     });
   });

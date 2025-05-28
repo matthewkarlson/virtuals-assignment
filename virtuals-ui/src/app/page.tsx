@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { web3Service } from '@/lib/web3';
+import Link from 'next/link';
 
 interface Agent {
   address: string;
@@ -17,6 +18,10 @@ interface Agent {
   virtualRaised: string;
   graduated: boolean;
   tokensSold: string;
+  graduationThreshold?: string;
+  externalTokenAddress?: string;
+  uniswapPairAddress?: string;
+  internalTokenBalance: string;
 }
 
 export default function Home() {
@@ -31,6 +36,8 @@ export default function Home() {
   const [agentName, setAgentName] = useState('');
   const [agentSymbol, setAgentSymbol] = useState('');
   const [deposit, setDeposit] = useState('6000');
+  const [buyAmount, setBuyAmount] = useState('');
+  const [redeemAmount, setRedeemAmount] = useState('');
 
   const checkConnection = useCallback(async () => {
     try {
@@ -92,6 +99,13 @@ export default function Home() {
 
   const loadAgents = async () => {
     try {
+      // Get the current address directly from web3Service to avoid race conditions
+      const currentAddress = await web3Service.getAddress();
+      if (!currentAddress) {
+        console.warn('No wallet address available, skipping balance checks');
+        return;
+      }
+      
       const factoryContract = web3Service.getAgentFactoryContract();
       const agentAddresses = await factoryContract.allAgents();
       
@@ -99,11 +113,12 @@ export default function Home() {
       for (const agentAddress of agentAddresses) {
         try {
           const bondingCurve = web3Service.getBondingCurveContract(agentAddress);
-          const [virtualRaised, graduated, tokensSold, creator] = await Promise.all([
+          const [virtualRaised, graduated, tokensSold, creator, graduationThreshold] = await Promise.all([
             bondingCurve.virtualRaised(),
             bondingCurve.graduated(),
             bondingCurve.tokensSold(),
             bondingCurve.creator(),
+            bondingCurve.GRADUATION_THRESHOLD(),
           ]);
 
           // Get token info
@@ -114,6 +129,26 @@ export default function Home() {
             iToken.symbol(),
           ]);
 
+          // Get external token info if graduated
+          let externalTokenAddress: string | undefined;
+          let uniswapPairAddress: string | undefined;
+          let internalTokenBalance: string = '0';
+          
+          if (graduated) {
+            try {
+              externalTokenAddress = await bondingCurve.eToken();
+              uniswapPairAddress = await bondingCurve.uniswapPair();
+              
+              // Get user's internal token balance for graduated agents using current address
+              const iTokenAddress = await bondingCurve.iToken();
+              const iToken = web3Service.getAgentTokenInternalContract(iTokenAddress);
+              const balance = await iToken.balanceOf(currentAddress);
+              internalTokenBalance = web3Service.formatEther(balance);
+            } catch (error) {
+              console.error(`Failed to get external token info for ${agentAddress}:`, error);
+            }
+          }
+
           agentData.push({
             address: agentAddress,
             name: name.replace('fun ', ''), // Remove "fun " prefix
@@ -122,6 +157,10 @@ export default function Home() {
             virtualRaised: web3Service.formatEther(virtualRaised),
             graduated,
             tokensSold: web3Service.formatEther(tokensSold),
+            graduationThreshold: web3Service.formatEther(graduationThreshold),
+            externalTokenAddress,
+            uniswapPairAddress,
+            internalTokenBalance,
           });
         } catch (error) {
           console.error(`Failed to load agent ${agentAddress}:`, error);
@@ -143,12 +182,19 @@ export default function Home() {
     try {
       setLoading(true);
       
+      // Get the current address directly from web3Service to avoid race conditions
+      const currentAddress = await web3Service.getAddress();
+      if (!currentAddress) {
+        alert('Wallet not connected');
+        return;
+      }
+      
       const easyVContract = web3Service.getEasyVContract();
       const factoryContract = web3Service.getAgentFactoryContract();
       const depositAmount = web3Service.parseEther(deposit);
 
       // Check balance
-      const balance = await easyVContract.balanceOf(address);
+      const balance = await easyVContract.balanceOf(currentAddress);
       if (balance < depositAmount) {
         alert('Insufficient EasyV balance');
         return;
@@ -183,6 +229,13 @@ export default function Home() {
     try {
       setLoading(true);
       
+      // Get the current address directly from web3Service to avoid race conditions
+      const currentAddress = await web3Service.getAddress();
+      if (!currentAddress) {
+        alert('Wallet not connected');
+        return;
+      }
+      
       const easyVContract = web3Service.getEasyVContract();
       const bondingCurve = web3Service.getBondingCurveContract(agentAddress);
       const buyAmount = web3Service.parseEther(amount);
@@ -207,6 +260,78 @@ export default function Home() {
     }
   };
 
+  const redeemTokens = async (agentAddress: string, amount: string) => {
+    try {
+      setLoading(true);
+      
+      // Get the current address directly from web3Service to avoid race conditions
+      const currentAddress = await web3Service.getAddress();
+      if (!currentAddress) {
+        alert('Wallet not connected');
+        return;
+      }
+      
+      const bondingCurve = web3Service.getBondingCurveContract(agentAddress);
+      
+      // Check if agent is graduated
+      const graduated = await bondingCurve.graduated();
+      if (!graduated) {
+        alert('This agent has not graduated yet. Redemption is only available for graduated agents.');
+        return;
+      }
+      
+      const iTokenAddress = await bondingCurve.iToken();
+      const iToken = web3Service.getAgentTokenInternalContract(iTokenAddress);
+      const redeemAmount = web3Service.parseEther(amount);
+
+      // Check user's internal token balance
+      const userBalance = await iToken.balanceOf(currentAddress);
+      if (userBalance < redeemAmount) {
+        alert(`Insufficient internal token balance. You have ${web3Service.formatEther(userBalance)} tokens but trying to redeem ${amount}.`);
+        return;
+      }
+
+      // Check current allowance
+      const currentAllowance = await iToken.allowance(currentAddress, bondingCurve.target);
+      if (currentAllowance < redeemAmount) {
+        console.log(`Current allowance: ${web3Service.formatEther(currentAllowance)}, needed: ${amount}`);
+        
+        // Approve bonding curve to burn internal tokens
+        const approveTx = await iToken.approve(bondingCurve.target, redeemAmount);
+        await approveTx.wait();
+        console.log('Approval transaction completed');
+      }
+
+      // Redeem tokens
+      const redeemTx = await bondingCurve.redeem(redeemAmount);
+      await redeemTx.wait();
+
+      // Reload data
+      await loadData();
+      
+      alert('Tokens redeemed successfully!');
+    } catch (error) {
+      console.error('Failed to redeem tokens:', error);
+      
+      // Provide more specific error messages
+      if (error instanceof Error) {
+        if (error.message.includes('ERC20InsufficientAllowance')) {
+          alert('Insufficient allowance. Please try again - the approval might not have been processed yet.');
+        } else if (error.message.includes('ERC20InsufficientBalance')) {
+          alert('Insufficient token balance for redemption.');
+        } else if (error.message.includes('!grad')) {
+          alert('This agent has not graduated yet. Redemption is only available for graduated agents.');
+        } else {
+          alert(`Failed to redeem tokens: ${error.message}`);
+        }
+      } else {
+        alert('Failed to redeem tokens. Check console for details.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
       <div className="container mx-auto px-4 py-8">
@@ -219,6 +344,11 @@ export default function Home() {
             <p className="text-slate-600 dark:text-slate-400 mt-2">
               Create and trade AI agents with bonding curves
             </p>
+            <div className="flex gap-4 mt-3">
+              <Link href="/graduated" className="text-blue-600 hover:text-blue-800 text-sm font-medium">
+                🎓 View Graduated Agents →
+              </Link>
+            </div>
           </div>
           
           {!isConnected ? (
@@ -352,6 +482,88 @@ export default function Home() {
                               </div>
                             </div>
 
+                            {!agent.graduated && agent.graduationThreshold && (
+                              <div className="mb-3">
+                                <div className="flex justify-between text-sm mb-1">
+                                  <span className="text-slate-600">Graduation Progress:</span>
+                                  <span className="text-slate-600">
+                                    {((parseFloat(agent.virtualRaised) / parseFloat(agent.graduationThreshold)) * 100).toFixed(1)}%
+                                  </span>
+                                </div>
+                                <div className="w-full bg-slate-200 rounded-full h-2">
+                                  <div 
+                                    className="bg-blue-600 h-2 rounded-full transition-all duration-300" 
+                                    style={{ 
+                                      width: `${Math.min(100, (parseFloat(agent.virtualRaised) / parseFloat(agent.graduationThreshold)) * 100)}%` 
+                                    }}
+                                  ></div>
+                                </div>
+                                <p className="text-xs text-slate-500 mt-1">
+                                  Need {(parseFloat(agent.graduationThreshold) - parseFloat(agent.virtualRaised)).toFixed(2)} more EasyV to graduate
+                                </p>
+                              </div>
+                            )}
+
+                            {agent.graduated && agent.externalTokenAddress && (
+                              <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+                                <h4 className="font-semibold text-green-800 mb-2">🎓 Graduated Agent</h4>
+                                <div className="space-y-2 text-sm">
+                                  <div>
+                                    <span className="font-medium">External Token:</span>{' '}
+                                    <span className="font-mono text-xs">{agent.externalTokenAddress}</span>
+                                  </div>
+                                  <div>
+                                    <span className="font-medium">Uniswap Pair:</span>{' '}
+                                    <span className="font-mono text-xs">{agent.uniswapPairAddress}</span>
+                                  </div>
+                                  <div>
+                                    <span className="font-medium">Your Internal Tokens:</span>{' '}
+                                    <span className="font-semibold">{agent.internalTokenBalance} tokens</span>
+                                  </div>
+                                  
+                                  {parseFloat(agent.internalTokenBalance) > 0 && (
+                                    <div className="mt-3">
+                                      <div className="flex gap-2">
+                                        <input
+                                          type="number"
+                                          placeholder="Amount to redeem"
+                                          className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm"
+                                          value={redeemAmount}
+                                          onChange={(e) => setRedeemAmount(e.target.value)}
+                                          max={agent.internalTokenBalance}
+                                        />
+                                        <Button
+                                          onClick={() => redeemTokens(agent.address, redeemAmount)}
+                                          disabled={loading || !redeemAmount || parseFloat(redeemAmount) <= 0}
+                                          className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 text-sm"
+                                        >
+                                          Redeem
+                                        </Button>
+                                      </div>
+                                      <p className="text-xs text-gray-600 mt-1">
+                                        Redeem internal tokens for external tokens (1:1 ratio)
+                                      </p>
+                                    </div>
+                                  )}
+                                  
+                                  {parseFloat(agent.internalTokenBalance) === 0 && (
+                                    <p className="text-sm text-gray-600 mt-2">
+                                      You don't have any internal tokens to redeem for this agent.
+                                    </p>
+                                  )}
+                                  
+                                  <div className="mt-3 pt-3 border-t border-green-200">
+                                    <Link 
+                                      href="/graduated" 
+                                      className="text-green-600 hover:text-green-800 text-sm font-medium"
+                                    >
+                                      Trade on Uniswap →
+                                    </Link>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                            
                             <Separator className="my-3" />
                             
                             <div className="flex gap-2">

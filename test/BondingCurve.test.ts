@@ -316,8 +316,11 @@ describe("BondingCurve", function () {
 
       const eToken = await ethers.getContractAt("AgentTokenExternal", eTokenAddress);
       expect(await eToken.totalSupply()).to.equal(SUPPLY);
-      // After graduation, 50% of tokens go to liquidity, so bonding curve holds 50%
-      expect(await eToken.balanceOf(await bondingCurve.getAddress())).to.equal(SUPPLY / 2n);
+      
+      // After graduation, bonding curve holds exactly tokensSold for redemption
+      // The rest goes to liquidity
+      const tokensSold = await bondingCurve.tokensSold();
+      expect(await eToken.balanceOf(await bondingCurve.getAddress())).to.equal(tokensSold);
 
       // Check token metadata
       const iTokenAddress = await bondingCurve.iToken();

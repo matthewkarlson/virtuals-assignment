@@ -1,0 +1,191 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Testing & Deployment Guide
+
+## Testing Strategy
+
+### Test Suite Overview
+**Location**: [test/](mdc:test)
+
+The project includes comprehensive testing covering all aspects of the protocol:
+
+### Core Test Files
+
+#### Integration Testing
+**File**: [test/Integration.test.ts](mdc:test/Integration.test.ts)
+- End-to-end user flows
+- Cross-contract interactions
+- Complete agent lifecycle testing
+- Real-world scenario simulation
+
+#### Bonding Curve Testing
+**File**: [test/BondingCurve.test.ts](mdc:test/BondingCurve.test.ts)
+- Price calculation accuracy
+- Buy/sell mechanics
+- Graduation threshold testing
+- Edge case handling
+
+#### Agent Factory Testing
+**File**: [test/AgentFactory.test.ts](mdc:test/AgentFactory.test.ts)
+- Agent proposal workflow
+- Application execution
+- Access control verification
+- Factory pattern validation
+
+#### Uniswap Integration Testing
+**File**: [test/BondingCurveUniswap.test.ts](mdc:test/BondingCurveUniswap.test.ts)
+- AMM graduation process
+- Liquidity migration
+- Price continuity verification
+- Slippage protection
+
+#### Interface Testing
+**File**: [test/EasyV.test.ts](mdc:test/EasyV.test.ts)
+- Simplified interface functionality
+- User experience validation
+- Error handling verification
+
+### Testing Patterns
+
+#### Mainnet Fork Testing
+```typescript
+// Hardhat configuration enables mainnet forking
+networks: {
+  hardhat: {
+    forking: {
+      url: `https://eth-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`,
+      blockNumber: 22582248,
+    }
+  }
+}
+```
+
+#### Test Structure
+1. **Setup** - Deploy contracts and initialize state
+2. **Execution** - Run test scenarios
+3. **Verification** - Assert expected outcomes
+4. **Cleanup** - Reset state for next test
+
+#### Mock Contracts
+**Location**: [contracts/mocks/](mdc:contracts/mocks)
+- Simplified versions for isolated testing
+- Predictable behavior for unit tests
+- Faster execution than mainnet interactions
+
+## Test Execution
+
+### Running Tests
+```bash
+# Run all tests
+npx hardhat test
+
+# Run specific test file
+npx hardhat test test/BondingCurve.test.ts
+
+# Run with gas reporting
+REPORT_GAS=true npx hardhat test
+
+# Run with coverage
+npx hardhat coverage
+```
+
+### Test Environment Setup
+1. Install dependencies: `npm install`
+2. Set up `.env` file with `ALCHEMY_API_KEY`
+3. Compile contracts: `npm run compile`
+4. Run tests: `npx hardhat test`
+
+### Continuous Integration
+- Automated testing on pull requests
+- Gas usage monitoring
+- Coverage reporting
+- Security analysis integration
+
+## Deployment Strategy
+
+### Build Process
+**Reference**: [package.json](mdc:package.json)
+
+```bash
+# Compile contracts and generate types
+npm run compile
+
+# Generate TypeScript bindings
+npm run typechain
+
+# Copy ABIs to frontend
+npm run copy-abis
+
+# Clean build artifacts
+npm run clean
+```
+
+### Deployment Configuration
+**File**: [hardhat.config.ts](mdc:hardhat.config.ts)
+
+- Solidity 0.8.28 with optimization
+- TypeChain integration for type safety
+- Network configurations for different environments
+
+### Ignition Deployment
+**Location**: [ignition/](mdc:ignition)
+- Hardhat Ignition modules for deployment
+- Parameterized deployment scripts
+- Deployment verification and validation
+
+### ABI Management
+**Reference**: [ABI_MANAGEMENT.md](mdc:ABI_MANAGEMENT.md)
+
+1. Contracts compile to `artifacts/` directory
+2. ABIs extracted and copied to frontend
+3. TypeChain generates TypeScript bindings
+4. Frontend imports ABIs for contract interaction
+
+## Quality Assurance
+
+### Code Quality
+- TypeScript for type safety
+- ESLint for code standards
+- Prettier for code formatting
+- Solhint for Solidity best practices
+
+### Security Measures
+- OpenZeppelin contract usage
+- Reentrancy protection
+- Access control implementation
+- Comprehensive test coverage
+
+### Performance Monitoring
+- Gas usage optimization
+- Contract size monitoring
+- Transaction cost analysis
+- Execution efficiency testing
+
+## Documentation References
+
+### Technical Documentation
+- **[README.md](mdc:README.md)** - Comprehensive architecture guide
+- **[TEST_SUMMARY.md](mdc:TEST_SUMMARY.md)** - Testing strategy and results
+- **[GRADUATION_FIX_SUMMARY.md](mdc:GRADUATION_FIX_SUMMARY.md)** - Graduation mechanism fixes
+- **[UNISWAP_INTEGRATION.md](mdc:UNISWAP_INTEGRATION.md)** - AMM integration details
+
+### Best Practices
+1. Write tests before implementation (TDD)
+2. Test edge cases and error conditions
+3. Use mainnet fork for realistic testing
+4. Monitor gas usage and optimize
+5. Validate all external integrations
+6. Document test scenarios and expected outcomes
+
+### Deployment Checklist
+- [ ] All tests passing
+- [ ] Gas optimization verified
+- [ ] Security audit completed
+- [ ] Documentation updated
+- [ ] Frontend integration tested
+- [ ] Deployment scripts validated
+- [ ] Network configuration verified
+- [ ] Post-deployment verification plan ready

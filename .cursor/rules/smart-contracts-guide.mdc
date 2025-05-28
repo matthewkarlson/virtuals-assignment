@@ -1,0 +1,120 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Smart Contracts Development Guide
+
+## Contract Architecture
+
+### Core Contracts
+
+#### AgentFactory.sol
+**Purpose**: Central factory for creating and managing AI agents
+**Key Functions**:
+- `proposeAgent()` - Submit new agent proposals
+- `executeApplication()` - Create agent after approval
+- `initFromBondingCurve()` - Initialize agent from bonding curve graduation
+
+**Location**: [contracts/AgentFactory.sol](mdc:contracts/AgentFactory.sol)
+
+#### BondingCurve.sol
+**Purpose**: Price discovery mechanism for new agent tokens
+**Key Functions**:
+- `launch()` - Launch new token on bonding curve
+- `buy()` / `sell()` - Trading functions
+- `_openTradingOnUniswap()` - Graduate to AMM
+
+**Key Constants**:
+```solidity
+uint256 public constant K = 3_000_000_000_000; // Bonding curve parameter
+```
+
+**Location**: [contracts/BondingCurve.sol](mdc:contracts/BondingCurve.sol)
+
+#### Agent Token Contracts
+- **[AgentTokenExternal.sol](mdc:contracts/AgentTokenExternal.sol)** - External token implementation
+- **[AgentTokenInternal.sol](mdc:contracts/AgentTokenInternal.sol)** - Internal token implementation
+
+### Contract Interfaces
+**Location**: [contracts/interfaces/](mdc:contracts/interfaces)
+- Uniswap V2 interfaces for AMM integration
+- Custom protocol interfaces
+
+### Mock Contracts
+**Location**: [contracts/mocks/](mdc:contracts/mocks)
+- Testing utilities and mock implementations
+
+## Development Patterns
+
+### Factory Pattern
+The `AgentFactory` uses the factory pattern to create standardized agent instances with:
+- Agent tokens (ERC20)
+- Governance DAOs
+- Voting escrow tokens (veTokens)
+- NFT representations
+- Token Bound Accounts (TBA)
+
+### Bonding Curve Mathematics
+The bonding curve implements a mathematical formula for price discovery:
+- Constant product formula with parameter K
+- Automatic graduation threshold
+- Liquidity migration to Uniswap
+
+### Access Control
+Contracts use OpenZeppelin's access control patterns:
+- Role-based permissions
+- Owner-only functions
+- Pausable functionality
+
+## Testing Strategy
+
+### Test Files
+- **[BondingCurve.test.ts](mdc:test/BondingCurve.test.ts)** - Bonding curve mechanics
+- **[AgentFactory.test.ts](mdc:test/AgentFactory.test.ts)** - Agent creation flow
+- **[Integration.test.ts](mdc:test/Integration.test.ts)** - End-to-end scenarios
+- **[BondingCurveUniswap.test.ts](mdc:test/BondingCurveUniswap.test.ts)** - Uniswap integration
+- **[EasyV.test.ts](mdc:test/EasyV.test.ts)** - Simplified interface testing
+
+### Testing Approach
+1. Unit tests for individual contract functions
+2. Integration tests for cross-contract interactions
+3. Mainnet fork testing for Uniswap integration
+4. Gas optimization testing
+
+## Deployment & Configuration
+
+### Hardhat Configuration
+**File**: [hardhat.config.ts](mdc:hardhat.config.ts)
+- Solidity 0.8.28 with optimization
+- Mainnet forking for testing
+- TypeChain integration for type safety
+
+### Build Process
+1. `npm run compile` - Compile contracts and generate types
+2. `npm run typechain` - Generate TypeScript bindings
+3. `npm run copy-abis` - Copy ABIs to frontend
+
+### Environment Setup
+- Requires `.env` file with `ALCHEMY_API_KEY`
+- Mainnet fork at block 22582248
+- TypeChain output in `typechain-types/`
+
+## Best Practices
+
+### Security Considerations
+- Use OpenZeppelin contracts for standard functionality
+- Implement reentrancy guards
+- Validate all external calls
+- Use safe math operations
+
+### Gas Optimization
+- Optimizer runs set to 200 (balance between size and execution cost)
+- Efficient storage patterns
+- Batch operations where possible
+
+### Code Organization
+- Separate interfaces from implementations
+- Use inheritance for shared functionality
+- Clear naming conventions
+- Comprehensive documentation

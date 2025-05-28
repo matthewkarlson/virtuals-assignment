@@ -167,6 +167,12 @@ export class Web3Service {
     return createLoggingContract(contract, 'EasyV', CONTRACTS.EASYV);
   }
 
+  getEasyVAddress(): string {
+    console.log('🪙 Web3Service.getEasyVAddress() called');
+    console.log(`🪙 EasyV address: ${CONTRACTS.EASYV}`);
+    return CONTRACTS.EASYV;
+  }
+
   getAgentFactoryContract() {
     console.log('🏭 Web3Service.getAgentFactoryContract() called');
     console.log(`🏭 AgentFactory address: ${CONTRACTS.AGENT_FACTORY}`);
@@ -205,6 +211,23 @@ export class Web3Service {
     console.log(`🎫📤 AgentTokenExternal ABI available:`, !!ABIS.AgentTokenExternal);
     const contract = new ethers.Contract(address, ABIS.AgentTokenExternal, this.signer!);
     return createLoggingContract(contract, 'AgentTokenExternal', address);
+  }
+
+  // Uniswap V2 Router
+  getUniswapRouterContract() {
+    console.log(`🦄 Web3Service.getUniswapRouterContract() called`);
+    console.log(`🦄 Router address: ${CONTRACTS.UNISWAP_ROUTER}`);
+    console.log(`🦄 IUniswapV2Router02 ABI available:`, !!ABIS.IUniswapV2Router02);
+    const contract = new ethers.Contract(CONTRACTS.UNISWAP_ROUTER, ABIS.IUniswapV2Router02, this.signer!);
+    return createLoggingContract(contract, 'UniswapV2Router02', CONTRACTS.UNISWAP_ROUTER);
+  }
+
+  // Uniswap V2 Pair
+  getUniswapPairContract(address: string) {
+    console.log(`🦄📊 Web3Service.getUniswapPairContract() called with address: ${address}`);
+    console.log(`🦄📊 IUniswapV2Pair ABI available:`, !!ABIS.IUniswapV2Pair);
+    const contract = new ethers.Contract(address, ABIS.IUniswapV2Pair, this.signer!);
+    return createLoggingContract(contract, 'UniswapV2Pair', address);
   }
 
   async getBalance(address: string): Promise<string> {

@@ -1,0 +1,120 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Frontend Development Guide
+
+## Project Structure
+
+### Next.js Application
+**Location**: [virtuals-ui/](mdc:virtuals-ui)
+
+The frontend is a modern Next.js application for interacting with the Virtual Protocol smart contracts.
+
+### Key Configuration Files
+- **[virtuals-ui/package.json](mdc:virtuals-ui/package.json)** - Dependencies and scripts
+- **[virtuals-ui/next.config.ts](mdc:virtuals-ui/next.config.ts)** - Next.js configuration
+- **[virtuals-ui/tsconfig.json](mdc:virtuals-ui/tsconfig.json)** - TypeScript configuration
+- **[virtuals-ui/components.json](mdc:virtuals-ui/components.json)** - UI components configuration
+
+### Application Structure
+- **[virtuals-ui/src/app/](mdc:virtuals-ui/src/app)** - Next.js App Router pages
+- **[virtuals-ui/src/components/](mdc:virtuals-ui/src/components)** - Reusable React components
+- **[virtuals-ui/src/lib/](mdc:virtuals-ui/src/lib)** - Utility functions and configurations
+
+### UI Components
+**Location**: [virtuals-ui/src/components/ui/](mdc:virtuals-ui/src/components/ui)
+- Modern UI components built with shadcn/ui
+- Consistent design system
+- Accessible components
+
+### ABI Integration
+**Location**: [virtuals-ui/src/lib/abis/](mdc:virtuals-ui/src/lib/abis)
+- Contract ABIs copied from compiled artifacts
+- TypeScript bindings for type safety
+- Automated sync with contract compilation
+
+## Development Workflow
+
+### Setup
+1. Navigate to `virtuals-ui/` directory
+2. Install dependencies: `npm install`
+3. Start development server: `npm run dev`
+4. Build for production: `npm run build`
+
+### Contract Integration
+1. Compile contracts in root: `npm run compile`
+2. ABIs are automatically copied to `virtuals-ui/src/lib/abis/`
+3. Use TypeChain types for contract interactions
+4. Import ABIs in React components for Web3 integration
+
+### Key Features
+- **Agent Creation Interface** - UI for proposing and creating AI agents
+- **Bonding Curve Trading** - Interface for buying/selling on bonding curves
+- **Governance Dashboard** - Agent DAO voting and proposal management
+- **Portfolio Management** - User token holdings and staking interface
+
+## Web3 Integration Patterns
+
+### Contract Interaction
+```typescript
+// Example pattern for contract interaction
+import { useContract } from 'wagmi'
+import AgentFactoryABI from '@/lib/abis/AgentFactory.json'
+
+const contract = useContract({
+  address: AGENT_FACTORY_ADDRESS,
+  abi: AgentFactoryABI,
+})
+```
+
+### State Management
+- React hooks for Web3 state
+- Wagmi for Ethereum interactions
+- Context providers for global state
+
+### Error Handling
+- Transaction error boundaries
+- User-friendly error messages
+- Retry mechanisms for failed transactions
+
+## UI/UX Guidelines
+
+### Design System
+- Consistent color palette
+- Typography scale
+- Component spacing
+- Responsive design patterns
+
+### User Experience
+- Clear transaction flows
+- Loading states and feedback
+- Progressive disclosure of complex features
+- Mobile-first responsive design
+
+### Accessibility
+- ARIA labels and roles
+- Keyboard navigation
+- Screen reader compatibility
+- Color contrast compliance
+
+## Development Best Practices
+
+### Code Organization
+- Component composition over inheritance
+- Custom hooks for business logic
+- Separation of concerns
+- Consistent file naming
+
+### Performance
+- Code splitting and lazy loading
+- Image optimization
+- Bundle size monitoring
+- Caching strategies
+
+### Testing
+- Component testing with React Testing Library
+- Integration tests for user flows
+- E2E testing for critical paths
+- Visual regression testing

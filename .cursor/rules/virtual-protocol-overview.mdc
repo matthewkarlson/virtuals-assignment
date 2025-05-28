@@ -1,0 +1,65 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Virtual Protocol: Smart Contract Architecture Overview
+
+## Project Structure
+
+This is a comprehensive Web3 project for creating and managing AI agents with their own tokens, governance, and economic systems. The project consists of:
+
+### Core Smart Contracts
+- **[AgentFactory.sol](mdc:contracts/AgentFactory.sol)** - Creates and manages AI agents
+- **[BondingCurve.sol](mdc:contracts/BondingCurve.sol)** - Initial price discovery mechanism for agent tokens
+- **[AgentTokenExternal.sol](mdc:contracts/AgentTokenExternal.sol)** - External agent token implementation
+- **[AgentTokenInternal.sol](mdc:contracts/AgentTokenInternal.sol)** - Internal agent token implementation
+- **[EasyV.sol](mdc:contracts/EasyV.sol)** - Simplified interface contract
+
+### Frontend Application
+- **[virtuals-ui/](mdc:virtuals-ui)** - Next.js frontend application for interacting with the protocol
+
+### Configuration & Setup
+- **[hardhat.config.ts](mdc:hardhat.config.ts)** - Hardhat configuration with mainnet forking
+- **[package.json](mdc:package.json)** - Project dependencies and scripts
+- **[tsconfig.json](mdc:tsconfig.json)** - TypeScript configuration
+
+### Testing Suite
+- **[test/](mdc:test)** - Comprehensive test suite covering all contract functionality
+- **[Integration.test.ts](mdc:test/Integration.test.ts)** - End-to-end integration tests
+- **[BondingCurve.test.ts](mdc:test/BondingCurve.test.ts)** - Bonding curve mechanism tests
+- **[AgentFactory.test.ts](mdc:test/AgentFactory.test.ts)** - Agent creation and management tests
+
+### Documentation
+- **[README.md](mdc:README.md)** - Comprehensive architecture guide
+- **[ABI_MANAGEMENT.md](mdc:ABI_MANAGEMENT.md)** - ABI management and deployment guide
+- **[GRADUATION_FIX_SUMMARY.md](mdc:GRADUATION_FIX_SUMMARY.md)** - Graduation mechanism fixes
+- **[UNISWAP_INTEGRATION.md](mdc:UNISWAP_INTEGRATION.md)** - Uniswap integration details
+- **[TEST_SUMMARY.md](mdc:TEST_SUMMARY.md)** - Testing strategy and results
+
+## Key Concepts
+
+### Agent Lifecycle
+1. **Proposal** - Users propose new AI agents through AgentFactory
+2. **Bonding Curve** - Initial price discovery via bonding curve mechanism
+3. **Graduation** - Transition to Uniswap AMM when threshold is met
+4. **Governance** - Agent-specific DAOs for decision making
+
+### Token Economics
+- **Agent Tokens** - Main trading tokens for each agent
+- **veTokens** - Voting escrow tokens for governance
+- **LP Tokens** - Liquidity provider tokens
+- **VIRTUAL** - Protocol governance token
+
+### Development Workflow
+1. Use `npm run compile` to compile contracts and generate TypeChain types
+2. Run tests with `npx hardhat test`
+3. Deploy using Hardhat Ignition modules
+4. Frontend development in `virtuals-ui/` directory
+
+## Architecture Patterns
+- Factory pattern for agent creation
+- Bonding curve for price discovery
+- AMM integration for mature markets
+- Multi-tier governance system
+- NFT-based contribution tracking
