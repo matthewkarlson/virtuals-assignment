@@ -12,7 +12,7 @@ import {AgentTokenExternal} from "./AgentTokenExternal.sol";
  * @title BondingCurve
  * @notice Linear bonding curve MVP. Users purchase an internal token with
  *         VIRTUAL. When `virtualRaised` ≥ `GRADUATION_THRESHOLD`, mint an
- *         external ERC‑20 and allow 1 : 1 redemptions. *No* sell‑back path is
+ *         external ERC‑20 and allow 1 : 1 redemptions. *No* sell‑back path is
  *         implemented to keep the MVP simple.
  */
 contract BondingCurve is ReentrancyGuard {
@@ -22,15 +22,15 @@ contract BondingCurve is ReentrancyGuard {
     // Constants / immutables
     // ---------------------------------------------------------------------
 
-    uint256 public constant SUPPLY = 1_000_000_000 ether;      // 1 B tokens
+    uint256 public constant SUPPLY = 1_000_000_000 ether;      // 1 B tokens
 
-    IERC20  public immutable VIRTUAL;         // payment asset
-    address public immutable creator;         // agent creator / first buyer
-    uint256 public immutable GRADUATION_THRESHOLD; // amount of VIRTUAL to raise
-    uint256 public immutable K;               // slope constant for P(s) = K·s
+    IERC20  public VIRTUAL;         // payment asset
+    address public creator;         // agent creator / first buyer
+    uint256 public GRADUATION_THRESHOLD; // amount of VIRTUAL to raise
+    uint256 public K;               // slope constant for P(s) = K·s
 
-    AgentTokenInternal public immutable iToken; // internal token
-    AgentTokenExternal public eToken;           // external token (set on grad.)
+    AgentTokenInternal public iToken; // internal token
+    AgentTokenExternal public eToken; // external token (set on grad.)
 
     // ---------------------------------------------------------------------
     // State
@@ -39,6 +39,7 @@ contract BondingCurve is ReentrancyGuard {
     uint256 public tokensSold;     // cumulative sold along the curve
     uint256 public virtualRaised;  // cumulative VIRTUAL collected
     bool    public graduated;      // curve locked & external token minted
+    bool    public initialized;    // initialization flag
 
     // ---------------------------------------------------------------------
     // Events
@@ -49,20 +50,24 @@ contract BondingCurve is ReentrancyGuard {
     event Redeem(address indexed user, uint256 amount);
 
     // ---------------------------------------------------------------------
-    // Constructor
+    // Initialization (replaces constructor for proxy pattern)
     // ---------------------------------------------------------------------
 
-    constructor(
+    function initialize(
         address _virtual,
         string  memory name_,
         string  memory symbol_,
         address _creator,
         uint256 _threshold
-    ) {
+    ) external {
+        require(!initialized, "already initialized");
         require(_threshold > 0, "thr=0");
+        
         VIRTUAL = IERC20(_virtual);
         GRADUATION_THRESHOLD = _threshold;
-        K = (2 * _threshold) / SUPPLY / SUPPLY; // ensures area full‑sold = thr
+        // Fix K calculation to avoid zero: K = (2 * threshold * 1e18) / (SUPPLY^2)
+        // This ensures K > 0 and maintains proper scaling
+        K = (2 * _threshold * 1e18) / (SUPPLY * SUPPLY / 1e18);
         creator = _creator;
 
         // Deploy internal token; BondingCurve contract holds entire supply
@@ -72,6 +77,8 @@ contract BondingCurve is ReentrancyGuard {
             address(this),
             SUPPLY
         );
+        
+        initialized = true;
     }
 
     // ---------------------------------------------------------------------
@@ -86,6 +93,7 @@ contract BondingCurve is ReentrancyGuard {
         nonReentrant
         returns (uint256 tokenOut)
     {
+        require(initialized, "not initialized");
         require(!graduated, "graduated");
         require(virtualIn > 0, "0 in");
 
@@ -117,6 +125,7 @@ contract BondingCurve is ReentrancyGuard {
      * @notice After graduation, burn internal tokens to receive external ones.
      */
     function redeem(uint256 amount) external nonReentrant {
+        require(initialized, "not initialized");
         require(graduated, "!grad");
         require(amount > 0, "0");
         iToken.burnFrom(msg.sender, amount);

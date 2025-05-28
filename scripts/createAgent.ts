@@ -3,9 +3,9 @@ import { ethers } from "hardhat";
 async function main() {
   console.log("🤖 Creating a new agent...");
 
-  // You'll need to replace these addresses with your deployed contract addresses
-  const EASYV_ADDRESS = "0x..."; // Replace with deployed EasyV address
-  const AGENT_FACTORY_ADDRESS = "0x..."; // Replace with deployed AgentFactory address
+  // Deployed contract addresses from the successful deployment
+  const EASYV_ADDRESS = "0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6";
+  const AGENT_FACTORY_ADDRESS = "0x8A791620dd6260079BF849Dc5567aDC3F2FdC318";
 
   const [deployer] = await ethers.getSigners();
   console.log("Creating agent with account:", deployer.address);
@@ -45,11 +45,19 @@ async function main() {
   
   // Find the AgentCreated event
   const agentCreatedEvent = receipt?.logs.find(
-    (log: any) => log.fragment?.name === "AgentCreated"
+    (log: any) => {
+      try {
+        const parsed = agentFactory.interface.parseLog(log);
+        return parsed?.name === "AgentCreated";
+      } catch {
+        return false;
+      }
+    }
   );
   
   if (agentCreatedEvent) {
-    const [curveAddress, creator, name, symbol] = agentCreatedEvent.args;
+    const parsed = agentFactory.interface.parseLog(agentCreatedEvent);
+    const [curveAddress, creator, name, symbol] = parsed!.args;
     console.log("📊 Agent Details:");
     console.log("- Bonding Curve Address:", curveAddress);
     console.log("- Creator:", creator);
