@@ -11,7 +11,7 @@ import {AgentTokenExternal} from "./AgentTokenExternal.sol";
 /**
  * @title BondingCurve
  * @notice Linear bonding curve MVP. Users purchase an internal token with
- *         VIRTUAL. When `virtualRaised` ≥ `GRADUATION_THRESHOLD`, mint an
+ *         EasyV. When `virtualRaised` ≥ `GRADUATION_THRESHOLD`, mint an
  *         external ERC‑20 and allow 1 : 1 redemptions. *No* sell‑back path is
  *         implemented to keep the MVP simple.
  */
