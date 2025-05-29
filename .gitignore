@@ -19,3 +19,8 @@ node_modules
 # Hardhat Ignition default folder for deployments against a local node
 ignition/deployments/chain-31337
 out/
+
+# Curve modelling
+curve_modelling/curve_modelling.egg-info/
+curve_modelling/__pycache__/
+*_pycache__/    
