@@ -1,218 +1,317 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {IERC20, ERC20}       from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import {SafeERC20}          from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {ReentrancyGuard}    from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-import {AgentTokenInternal} from "./AgentTokenInternal.sol";
-import {AgentTokenExternal} from "./AgentTokenExternal.sol";
-import {IUniswapV2Factory}  from "./interfaces/IUniswapV2Factory.sol";
-import {IUniswapV2Router02} from "./interfaces/IUniswapV2Router02.sol";
-import {IUniswapV2Pair}     from "./interfaces/IUniswapV2Pair.sol";
+import "./AgentTokenInternal.sol";
+import "./AgentTokenExternal.sol";
 
-/**
- * @title BondingCurve
- * @notice Linear bonding curve MVP. Users purchase an internal token with
- *         EasyV. When `virtualRaised` ≥ `GRADUATION_THRESHOLD`, mint an
- *         external ERC‑20, create a Uniswap V2 pair, and add liquidity.
- *         After graduation, users can redeem internal tokens 1:1 for external tokens.
- */
-contract BondingCurve is ReentrancyGuard {
+// Interface for AgentFactory integration
+interface IAgentFactory {
+    function initFromBondingCurve(
+        string memory name,
+        string memory symbol,
+        uint8[] memory cores,
+        bytes32 tbaSalt,
+        address tbaImplementation,
+        uint32 daoVotingPeriod,
+        uint256 daoThreshold,
+        uint256 applicationThreshold_,
+        address creator
+    ) external returns (uint256);
+}
+
+contract BondingCurve is ReentrancyGuard, Ownable {
     using SafeERC20 for IERC20;
 
-    // ---------------------------------------------------------------------
-    // Constants / immutables
-    // ---------------------------------------------------------------------
-
-    uint256 public constant SUPPLY = 1_000_000_000 ether;      // 1 B tokens
-
-    IERC20  public VIRTUAL;         // payment asset
-    address public creator;         // agent creator / first buyer
-    uint256 public GRADUATION_THRESHOLD; // amount of VIRTUAL to raise
-    uint256 public K;               // slope constant for P(s) = K·s
+    // Constants matching the fun system
+    uint256 public constant K = 3_000_000_000_000;
+    uint256 public constant INITIAL_SUPPLY = 1_000_000_000 ether; // 1B tokens
     uint256 public constant PRECISION = 1e18;
-    // Uniswap V2 integration
-    IUniswapV2Router02 public uniswapRouter;
-    IUniswapV2Factory  public uniswapFactory;
-    address public uniswapPair;     // created upon graduation
 
-    AgentTokenInternal public iToken; // internal token
-    AgentTokenExternal public eToken; // external token (set on grad.)
-
-    // ---------------------------------------------------------------------
-    // State
-    // ---------------------------------------------------------------------
-
-    uint256 public tokensSold;     // cumulative sold along the curve
-    uint256 public virtualRaised;  // cumulative VIRTUAL collected
-    bool    public graduated;      // curve locked & external token minted
-    bool    public initialized;    // initialization flag
-
-    // ---------------------------------------------------------------------
+    // Core contracts
+    IERC20 public VIRTUAL; // Payment token
+    AgentTokenInternal public iToken; // Internal trading token
+    AgentTokenExternal public eToken; // External agent token (after graduation)
+    
+    // State variables
+    address public creator;
+    uint256 public graduationThreshold;
+    uint256 public virtualRaised;
+    uint256 public tokensSold;
+    bool public graduated;
+    bool public tradingEnabled;
+    bool public initialized;
+    
+    // Factory integration
+    address public agentFactory;
+    
+    // Pricing variables (following fun system)
+    uint256 public currentPrice;
+    uint256 public marketCap;
+    uint256 public liquidity;
+    
     // Events
-    // ---------------------------------------------------------------------
+    event TokenLaunched(address indexed token, address indexed creator, uint256 initialPurchase);
+    event Buy(address indexed buyer, uint256 virtualIn, uint256 tokensOut, uint256 newPrice);
+    event Sell(address indexed seller, uint256 tokensIn, uint256 virtualOut, uint256 newPrice);
+    event Graduated(address indexed token, address indexed agentToken, uint256 id);
 
-    event Buy(address indexed buyer, uint256 virtualIn, uint256 tokensOut);
-    event Graduate(address externalToken, address uniswapPair, uint256 liquidityTokens);
-    event Redeem(address indexed user, uint256 amount);
+    error InvalidTokenStatus();
+    error InvalidInput();
+    error SlippageTooHigh();
+    error NotInitialized();
+    error AlreadyInitialized();
 
-    // ---------------------------------------------------------------------
-    // Initialization (replaces constructor for proxy pattern)
-    // ---------------------------------------------------------------------
+    constructor() Ownable(msg.sender) {}
 
     function initialize(
         address _virtual,
-        string  memory name_,
-        string  memory symbol_,
+        string memory name_,
+        string memory symbol_,
         address _creator,
-        uint256 _threshold
+        uint256 _graduationThreshold,
+        address _agentFactory,
+        uint256 initialPurchase
     ) external {
-        require(!initialized, "already initialized");
-        require(_threshold > 0, "thr=0");
-        
-        VIRTUAL = IERC20(_virtual);
-        GRADUATION_THRESHOLD = _threshold;
-        K = 2; // Back to 2, using multiplier in formula instead
-        creator = _creator;
+        if (initialized) revert AlreadyInitialized();
 
-        // Deploy internal token; BondingCurve contract holds entire supply
+        require(_virtual != address(0), "Invalid virtual token");
+        require(_graduationThreshold > 0, "Invalid graduation threshold");
+        require(_agentFactory != address(0), "Invalid agent factory");
+        require(initialPurchase > 0, "Invalid initial purchase");
+
+        VIRTUAL = IERC20(_virtual);
+        creator = _creator;
+        graduationThreshold = _graduationThreshold;
+        agentFactory = _agentFactory;
+
+        // Deploy internal token for trading on the curve
         iToken = new AgentTokenInternal(
             string.concat("fun ", name_),
             string.concat("f", symbol_),
             address(this),
-            SUPPLY
+            INITIAL_SUPPLY
         );
-        
+
+        // Calculate initial liquidity based on fun system formula
+        uint256 k = ((K * 10000) / 1000); // Asset rate equivalent
+        liquidity = (((k * 10000 ether) / INITIAL_SUPPLY) * 1 ether) / 10000;
+        currentPrice = INITIAL_SUPPLY / liquidity;
+        marketCap = liquidity;
+
+        tradingEnabled = true;
         initialized = true;
+
+        // Transfer ownership to creator
+        _transferOwnership(_creator);
+
+        emit TokenLaunched(address(iToken), _creator, initialPurchase);
     }
 
-    // ---------------------------------------------------------------------
-    // Configuration functions (called by factory)
-    // ---------------------------------------------------------------------
+    function buy(
+        uint256 amountIn,
+        uint256 minTokensOut,
+        uint256 deadline
+    ) external nonReentrant returns (uint256 tokensOut) {
+        if (!initialized) revert NotInitialized();
+        if (!tradingEnabled) revert InvalidTokenStatus();
+        if (graduated) revert InvalidTokenStatus();
+        if (block.timestamp > deadline) revert InvalidInput();
+        if (amountIn == 0) revert InvalidInput();
 
-    function setUniswapRouter(address _router) external {
-        require(!graduated, "already graduated");
-        require(_router != address(0), "invalid router");
-        uniswapRouter = IUniswapV2Router02(_router);
-        uniswapFactory = IUniswapV2Factory(uniswapRouter.factory());
-    }
+        // Pull payment first
+        VIRTUAL.safeTransferFrom(msg.sender, address(this), amountIn);
 
-    // ---------------------------------------------------------------------
-    // External functions
-    // ---------------------------------------------------------------------
+        // Calculate tokens out using constant product formula similar to fun system
+        tokensOut = _calculateBuyAmount(amountIn);
+        
+        if (tokensOut < minTokensOut) revert SlippageTooHigh();
+        if (tokensSold + tokensOut > INITIAL_SUPPLY) revert InvalidInput();
 
-    /**
-     * @dev Linear‑curve purchase. Caller must approve VIRTUAL beforehand.
-     */
-    function buy(uint256 virtualIn, uint256 minTokensOut)
-        external
-        nonReentrant
-        returns (uint256 tokenOut)
-    {
-        require(initialized, "not initialized");
-        require(!graduated, "graduated");
-        require(virtualIn > 0, "0 in");
+        // Update state
+        virtualRaised += amountIn;
+        tokensSold += tokensOut;
+        
+        // Update pricing
+        _updatePricing();
 
-        // Pull payment before state changes (checks‑effects‑interactions)
-        VIRTUAL.safeTransferFrom(msg.sender, address(this), virtualIn);
+        // Transfer tokens
+        iToken.transfer(msg.sender, tokensOut);
 
-        // Invert area‑under‑curve to solve for Δs
-        uint256 s  = tokensSold;
-        uint256 radicand = (2 * virtualIn * PRECISION * 10000000) / K + s * s; // Multiply by 1M to get ~1000 tokens per VIRTUAL
-        uint256 newS = _sqrt(radicand);
-        tokenOut = newS - s;
-        require(tokenOut >= minTokensOut, "slip");
-        require(tokensSold + tokenOut <= SUPPLY, "sold out");
+        emit Buy(msg.sender, amountIn, tokensOut, currentPrice);
 
-        // Book‑keeping
-        tokensSold     = newS;
-        virtualRaised += virtualIn;
-
-        // Transfer internal tokens
-        iToken.transfer(msg.sender, tokenOut);
-        emit Buy(msg.sender, virtualIn, tokenOut);
-
-        if (virtualRaised >= GRADUATION_THRESHOLD) {
+        // Check graduation condition - when enough tokens sold or threshold reached
+        if (virtualRaised >= graduationThreshold) {
             _graduate();
         }
+
+        return tokensOut;
     }
 
-    /**
-     * @notice After graduation, burn internal tokens to receive external ones.
-     */
-    function redeem(uint256 amount) external nonReentrant {
-        require(initialized, "not initialized");
-        require(graduated, "!grad");
-        require(amount > 0, "0");
-        iToken.burnFrom(msg.sender, amount);
-        eToken.transfer(msg.sender, amount);
-        emit Redeem(msg.sender, amount);
+    function sell(
+        uint256 amountIn,
+        uint256 minVirtualOut,
+        uint256 deadline
+    ) external nonReentrant returns (uint256 virtualOut) {
+        if (!initialized) revert NotInitialized();
+        if (!tradingEnabled) revert InvalidTokenStatus();
+        if (graduated) revert InvalidTokenStatus();
+        if (block.timestamp > deadline) revert InvalidInput();
+        if (amountIn == 0) revert InvalidInput();
+
+        // Calculate virtual out using reverse calculation
+        virtualOut = _calculateSellAmount(amountIn);
+        
+        if (virtualOut < minVirtualOut) revert SlippageTooHigh();
+
+        // Transfer tokens from user and burn them
+        iToken.transferFrom(msg.sender, address(this), amountIn);
+        
+        // Update state
+        virtualRaised -= virtualOut;
+        tokensSold -= amountIn;
+        
+        // Update pricing
+        _updatePricing();
+
+        // Transfer virtual tokens
+        VIRTUAL.safeTransfer(msg.sender, virtualOut);
+
+        emit Sell(msg.sender, amountIn, virtualOut, currentPrice);
+
+        return virtualOut;
     }
 
-    // ---------------------------------------------------------------------
-    // Internal helpers
-    // ---------------------------------------------------------------------
+    function _calculateBuyAmount(uint256 virtualIn) internal view returns (uint256) {
+        // Following fun system approach - constant product formula
+        uint256 virtualReserve = liquidity;
+        uint256 tokenReserve = INITIAL_SUPPLY - tokensSold;
+        
+        if (tokenReserve == 0) return 0;
+        
+        // Constant product formula: x * y = k
+        uint256 k = virtualReserve * tokenReserve;
+        uint256 newVirtualReserve = virtualReserve + virtualIn;
+        uint256 newTokenReserve = k / newVirtualReserve;
+        
+        return tokenReserve - newTokenReserve;
+    }
+
+    function _calculateSellAmount(uint256 tokensIn) internal view returns (uint256) {
+        // Reverse calculation for selling
+        uint256 virtualReserve = liquidity;
+        uint256 tokenReserve = INITIAL_SUPPLY - tokensSold;
+        
+        if (tokenReserve <= tokensIn) return 0;
+        
+        uint256 k = virtualReserve * tokenReserve;
+        uint256 newTokenReserve = tokenReserve + tokensIn;
+        uint256 newVirtualReserve = k / newTokenReserve;
+        
+        return virtualReserve - newVirtualReserve;
+    }
+
+    function _updatePricing() internal {
+        uint256 tokenReserve = INITIAL_SUPPLY - tokensSold;
+        if (tokenReserve > 0) {
+            currentPrice = liquidity / tokenReserve;
+            marketCap = liquidity * 2; // Following fun system pattern
+        }
+    }
 
     function _graduate() internal {
-        require(address(uniswapRouter) != address(0), "router not set");
+        require(!graduated, "Already graduated");
         
+        tradingEnabled = false;
         graduated = true;
-        
-        // Deploy external token
+
+        // Deploy external agent token
         eToken = new AgentTokenExternal(
-            iToken.name(), 
-            iToken.symbol(), 
-            address(this), 
-            SUPPLY
+            iToken.name(),
+            iToken.symbol(),
+            address(this),
+            INITIAL_SUPPLY
         );
 
-        // Create Uniswap V2 pair
-        uniswapPair = uniswapFactory.createPair(address(eToken), address(VIRTUAL));
-        require(uniswapPair != address(0), "pair creation failed");
+        // Transfer all raised virtual tokens to agent factory for liquidity
+        uint256 liquidityAmount = VIRTUAL.balanceOf(address(this));
+        VIRTUAL.approve(agentFactory, liquidityAmount);
 
-        // Calculate liquidity amounts correctly:
-        // - tokensSold: amount of tokens that users can redeem (must be reserved)
-        // - remaining tokens: can go to liquidity
-        uint256 tokensForRedemption = tokensSold;
-        uint256 tokensForLiquidity = SUPPLY - tokensForRedemption;
-        uint256 virtualLiquidity = virtualRaised; // All raised VIRTUAL goes to liquidity
-
-        require(tokensForLiquidity > 0, "no tokens for liquidity");
-        require(virtualLiquidity > 0, "no virtual for liquidity");
-
-        // Approve router to spend tokens for liquidity
-        eToken.approve(address(uniswapRouter), tokensForLiquidity);
-        VIRTUAL.approve(address(uniswapRouter), virtualLiquidity);
-
-        // Add liquidity to Uniswap V2
-        (, , uint256 liquidityTokens) = uniswapRouter.addLiquidity(
-            address(eToken),
-            address(VIRTUAL),
-            tokensForLiquidity,
-            virtualLiquidity,
-            0, // Accept any amount of tokens
-            0, // Accept any amount of VIRTUAL
-            creator, // LP tokens go to creator
-            block.timestamp + 300 // 5 minute deadline
+        // Call agent factory to create the full agent with DAO, etc.
+        uint256 agentId = IAgentFactory(agentFactory).initFromBondingCurve(
+            string.concat(iToken.name(), " by Virtuals"),
+            iToken.symbol(),
+            new uint8[](0), // Empty cores array for now
+            bytes32(0), // Default salt
+            address(0), // Default TBA implementation
+            7 days, // Default voting period
+            1000 ether, // Default threshold
+            liquidityAmount,
+            creator
         );
 
-        require(liquidityTokens > 0, "liquidity addition failed");
-
-        // After liquidity is added, the bonding curve should have:
-        // SUPPLY - tokensForLiquidity = tokensForRedemption
-        // This ensures all internal tokens can be redeemed 1:1
-
-        emit Graduate(address(eToken), uniswapPair, liquidityTokens);
+        emit Graduated(address(iToken), address(eToken), agentId);
     }
 
-    function _sqrt(uint256 y) internal pure returns (uint256 z) {
-        if (y == 0) return 0;
-        uint256 x = y / 2 + 1;
-        z = y;
-        while (x < z) {
-            z = x;
-            x = (y / x + x) / 2;
+    function redeem(uint256 amount) external nonReentrant {
+        if (!initialized) revert NotInitialized();
+        if (!graduated) revert InvalidTokenStatus();
+        if (amount == 0) revert InvalidInput();
+
+        // Burn internal tokens and mint external ones 1:1
+        iToken.burnFrom(msg.sender, amount);
+        eToken.transfer(msg.sender, amount);
+    }
+
+    // View functions
+    function getReserves() external view returns (uint256 virtualReserve, uint256 tokenReserve) {
+        virtualReserve = liquidity;
+        tokenReserve = INITIAL_SUPPLY - tokensSold;
+    }
+
+    function getAmountOut(uint256 amountIn, bool isBuy) external view returns (uint256) {
+        if (isBuy) {
+            return _calculateBuyAmount(amountIn);
+        } else {
+            return _calculateSellAmount(amountIn);
         }
+    }
+
+    function getTokenInfo() external view returns (
+        address token,
+        string memory name,
+        string memory symbol,
+        uint256 supply,
+        uint256 price,
+        uint256 marketCapValue,
+        uint256 liquidityValue,
+        bool trading,
+        bool graduatedStatus
+    ) {
+        return (
+            address(iToken),
+            iToken.name(),
+            iToken.symbol(),
+            INITIAL_SUPPLY,
+            currentPrice,
+            marketCap,
+            liquidity,
+            tradingEnabled,
+            graduated
+        );
+    }
+
+    // Admin functions
+    function setGraduationThreshold(uint256 newThreshold) external onlyOwner {
+        graduationThreshold = newThreshold;
+    }
+
+    function setAgentFactory(address newFactory) external onlyOwner {
+        require(newFactory != address(0), "Invalid factory");
+        agentFactory = newFactory;
     }
 }
