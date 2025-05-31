@@ -10,7 +10,7 @@ export default buildModule("FullDeployment", (m) => {
   const { bondingCurveImpl } = m.useModule(BondingCurveImplementationModule);
 
   // Set the bonding curve implementation in the factory
-  m.call(agentFactory, "setBondingCurveImplementation", [bondingCurveImpl], {
+  const setBondingCurveImpl = m.call(agentFactory, "setBondingCurveImplementation", [bondingCurveImpl], {
     after: [agentFactory, bondingCurveImpl]
   });
 
@@ -19,9 +19,10 @@ export default buildModule("FullDeployment", (m) => {
   // Uncomment the lines below if you want to create a test agent during deployment
   
   /*
-  m.call(agentFactory, "createAgent", [
+  const createSampleAgent = m.call(agentFactory, "launch", [
     "Sample Agent",
-    "SAMPLE",
+    "SAMPLE", 
+    [1, 2, 3], // cores array
     ethers.parseEther("6000") // MIN_INITIAL_DEPOSIT
   ], {
     after: [setBondingCurveImpl]
