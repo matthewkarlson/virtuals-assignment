@@ -76,7 +76,6 @@ contract AgentFactory is Ownable {
     function launch(
         string calldata name,
         string calldata symbol,
-        uint8[] calldata cores,
         uint256 purchaseAmount
     ) external returns (address curve, uint256 tokensOut) {
         require(bondingCurveImplementation != address(0), "impl not set");

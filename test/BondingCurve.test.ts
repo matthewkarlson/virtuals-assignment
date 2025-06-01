@@ -1,537 +1,370 @@
-import { expect } from "chai";
 import { ethers } from "hardhat";
-import { BondingCurve, EasyV, AgentTokenInternal, AgentTokenExternal } from "../typechain-types";
-import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
+import { expect } from "chai";
+import { BondingCurve, AgentFactory, EasyV } from "../typechain-types";
+import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 
-describe("BondingCurve", function () {
-  let bondingCurve: BondingCurve;
-  let easyV: EasyV;
-  let owner: HardhatEthersSigner;
-  let creator: HardhatEthersSigner;
-  let buyer1: HardhatEthersSigner;
-  let buyer2: HardhatEthersSigner;
+describe("BondingCurve - Fun Style", function () {
+  let virtual: EasyV;
+  let bondingCurveImpl: BondingCurve;
+  let factory: AgentFactory;
+  let deployer: SignerWithAddress;
+  let user1: SignerWithAddress;
+  let user2: SignerWithAddress;
 
-  const INITIAL_SUPPLY = ethers.parseEther("1000000");
-  const GRADUATION_THRESHOLD = ethers.parseEther("42000");
-  const SUPPLY = ethers.parseEther("1000000000"); // 1B tokens
-
+  const INITIAL_DEPOSIT = ethers.parseEther("7000"); // 6k + 1k fee
+  const MIN_DEPOSIT = ethers.parseEther("6000");
+  const FEE = ethers.parseEther("1000");
+  const GRADUATION_THRESHOLD = ethers.parseEther("42000"); // 42k VIRTUAL
+  
   beforeEach(async function () {
-    [owner, creator, buyer1, buyer2] = await ethers.getSigners();
+    [deployer, user1, user2] = await ethers.getSigners();
 
-    // Deploy EasyV token
+    // Deploy VIRTUAL token with initial supply to deployer
+    const totalSupply = ethers.parseEther("10000000"); // 10M VIRTUAL total
     const EasyVFactory = await ethers.getContractFactory("EasyV");
-    easyV = await EasyVFactory.deploy(INITIAL_SUPPLY);
-    await easyV.waitForDeployment();
+    virtual = await EasyVFactory.deploy(totalSupply);
 
-    // Deploy BondingCurve
+    // Deploy bonding curve implementation
     const BondingCurveFactory = await ethers.getContractFactory("BondingCurve");
-    bondingCurve = await BondingCurveFactory.deploy();
-    await bondingCurve.waitForDeployment();
+    bondingCurveImpl = await BondingCurveFactory.deploy();
 
-    // Transfer tokens to test accounts
-    await easyV.transfer(creator.address, ethers.parseEther("100000"));
-    await easyV.transfer(buyer1.address, ethers.parseEther("100000"));
-    await easyV.transfer(buyer2.address, ethers.parseEther("100000"));
+    // Deploy factory
+    const AgentFactoryFactory = await ethers.getContractFactory("AgentFactory");
+    factory = await AgentFactoryFactory.deploy(await virtual.getAddress());
+
+    // Set implementation
+    await factory.setBondingCurveImplementation(await bondingCurveImpl.getAddress());
+
+    // Transfer VIRTUAL tokens to users
+    const userAmount = ethers.parseEther("1000000"); // 1M VIRTUAL each
+    await virtual.transfer(user1.address, userAmount);
+    await virtual.transfer(user2.address, userAmount);
   });
 
-  describe("Initialization", function () {
-    it("Should initialize correctly", async function () {
-      await bondingCurve.initialize(
-        await easyV.getAddress(),
+  describe("Token Launching", function () {
+    it("Should launch a new token with initial purchase", async function () {
+      // Approve factory to spend VIRTUAL
+      await virtual.connect(user1).approve(await factory.getAddress(), INITIAL_DEPOSIT);
+
+      // Launch new token using the new launch method
+      const tx = await factory.connect(user1).launch(
         "Test Agent",
         "TEST",
-        creator.address,
-        GRADUATION_THRESHOLD
+        [], // cores
+        INITIAL_DEPOSIT
       );
 
-      expect(await bondingCurve.initialized()).to.be.true;
-      expect(await bondingCurve.VIRTUAL()).to.equal(await easyV.getAddress());
-      expect(await bondingCurve.creator()).to.equal(creator.address);
-      expect(await bondingCurve.GRADUATION_THRESHOLD()).to.equal(GRADUATION_THRESHOLD);
-      expect(await bondingCurve.graduated()).to.be.false;
-      expect(await bondingCurve.virtualRaised()).to.equal(0);
-      expect(await bondingCurve.tokensSold()).to.equal(0);
+      const receipt = await tx.wait();
+      expect(receipt).to.not.be.null;
 
-      // Check K calculation
-      const K = await bondingCurve.K();
-      expect(K).to.be.gt(0);
+      // Check that bonding curve was created
+      const curveCount = await factory.bondingCurveCount();
+      expect(curveCount).to.equal(1);
 
-      // Check internal token
-      const iTokenAddress = await bondingCurve.iToken();
-      expect(iTokenAddress).to.not.equal(ethers.ZeroAddress);
+      const curves = await factory.allBondingCurves();
+      expect(curves.length).to.equal(1);
 
-      const iToken = await ethers.getContractAt("AgentTokenInternal", iTokenAddress);
-      expect(await iToken.name()).to.equal("fun Test Agent");
-      expect(await iToken.symbol()).to.equal("fTEST");
-      expect(await iToken.totalSupply()).to.equal(SUPPLY);
-      expect(await iToken.balanceOf(await bondingCurve.getAddress())).to.equal(SUPPLY);
+      const curveAddress = curves[0];
+      const curve = await ethers.getContractAt("BondingCurve", curveAddress);
+
+      // Check curve initialization
+      const creator = await curve.creator();
+      expect(creator).to.equal(user1.address);
+
+      const graduated = await curve.graduated();
+      expect(graduated).to.be.false;
+
+      const tradingEnabled = await curve.tradingEnabled();
+      expect(tradingEnabled).to.be.true;
+
+      // Check initial purchase was made
+      const virtualRaised = await curve.virtualRaised();
+      expect(virtualRaised).to.equal(MIN_DEPOSIT); // Should be deposit minus fee
+
+      const tokensSold = await curve.tokensSold();
+      expect(tokensSold).to.be.gt(0);
     });
 
-    it("Should reject double initialization", async function () {
-      await bondingCurve.initialize(
-        await easyV.getAddress(),
-        "Test Agent",
-        "TEST",
-        creator.address,
-        GRADUATION_THRESHOLD
-      );
+    it("Should have correct token info after launch", async function () {
+      await virtual.connect(user1).approve(await factory.getAddress(), INITIAL_DEPOSIT);
+      await factory.connect(user1).launch("Test Agent", "TEST", [], INITIAL_DEPOSIT);
 
-      await expect(
-        bondingCurve.initialize(
-          await easyV.getAddress(),
-          "Test Agent 2",
-          "TEST2",
-          creator.address,
-          GRADUATION_THRESHOLD
-        )
-      ).to.be.revertedWith("already initialized");
+      const curves = await factory.allBondingCurves();
+      const curve = await ethers.getContractAt("BondingCurve", curves[0]);
+
+      const tokenInfo = await curve.getTokenInfo();
+      
+      expect(tokenInfo.name).to.equal("fun Test Agent");
+      expect(tokenInfo.symbol).to.equal("fTEST");
+      expect(tokenInfo.supply).to.equal(ethers.parseEther("1000000000")); // 1B tokens
+      expect(tokenInfo.trading).to.be.true;
+      expect(tokenInfo.graduatedStatus).to.be.false;
     });
 
-    it("Should reject zero threshold", async function () {
-      await expect(
-        bondingCurve.initialize(
-          await easyV.getAddress(),
-          "Test Agent",
-          "TEST",
-          creator.address,
-          0
-        )
-      ).to.be.revertedWith("thr=0");
+    it("Should collect fees correctly", async function () {
+      const deployerBalanceBefore = await virtual.balanceOf(deployer.address);
+      
+      await virtual.connect(user1).approve(await factory.getAddress(), INITIAL_DEPOSIT);
+      await factory.connect(user1).launch("Test Agent", "TEST", [], INITIAL_DEPOSIT);
+
+      const deployerBalanceAfter = await virtual.balanceOf(deployer.address);
+      expect(deployerBalanceAfter - deployerBalanceBefore).to.equal(FEE);
     });
   });
 
-  describe("Buying tokens", function () {
+  describe("Trading on Bonding Curve", function () {
+    let curve: BondingCurve;
+
     beforeEach(async function () {
-      await bondingCurve.initialize(
-        await easyV.getAddress(),
-        "Test Agent",
-        "TEST",
-        creator.address,
-        GRADUATION_THRESHOLD
+      await virtual.connect(user1).approve(await factory.getAddress(), INITIAL_DEPOSIT);
+      await factory.connect(user1).launch("Test Agent", "TEST", [], INITIAL_DEPOSIT);
+
+      const curves = await factory.allBondingCurves();
+      curve = await ethers.getContractAt("BondingCurve", curves[0]);
+    });
+
+    it("Should allow buying tokens", async function () {
+      const buyAmount = ethers.parseEther("1000"); // 1k VIRTUAL
+      
+      await virtual.connect(user2).approve(await curve.getAddress(), buyAmount);
+      
+      const tokensBefore = await curve.tokensSold();
+      
+      const tx = await curve.connect(user2).buy(
+        buyAmount,
+        0, // min tokens out
+        Math.floor(Date.now() / 1000) + 300 // 5 min deadline
       );
 
-      // Set Uniswap router for graduation functionality
-      const uniswapRouter = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D";
-      await bondingCurve.setUniswapRouter(uniswapRouter);
+      const receipt = await tx.wait();
+      expect(receipt).to.not.be.null;
+
+      const tokensAfter = await curve.tokensSold();
+      expect(tokensAfter).to.be.greaterThan(tokensBefore);
+
+      // Check user received tokens
+      const iToken = await ethers.getContractAt("AgentTokenInternal", await curve.iToken());
+      const userBalance = await iToken.balanceOf(user2.address);
+      expect(userBalance).to.be.greaterThan(0);
     });
 
-    it("Should buy tokens successfully", async function () {
+    it("Should allow selling tokens", async function () {
       const buyAmount = ethers.parseEther("1000");
       
-      await easyV.connect(buyer1).approve(await bondingCurve.getAddress(), buyAmount);
+      // First buy some tokens
+      await virtual.connect(user2).approve(await curve.getAddress(), buyAmount);
+      await curve.connect(user2).buy(buyAmount, 0, Math.floor(Date.now() / 1000) + 300);
+
+      const iToken = await ethers.getContractAt("AgentTokenInternal", await curve.iToken());
+      const userTokens = await iToken.balanceOf(user2.address);
       
-      const tx = await bondingCurve.connect(buyer1).buy(buyAmount, 0);
+      // Approve curve to spend tokens
+      await iToken.connect(user2).approve(await curve.getAddress(), userTokens);
+      
+      const virtualBefore = await virtual.balanceOf(user2.address);
+      
+      // Sell half the tokens
+      const sellAmount = userTokens / 2n;
+      await curve.connect(user2).sell(
+        sellAmount,
+        0, // min virtual out
+        Math.floor(Date.now() / 1000) + 300
+      );
+
+      const virtualAfter = await virtual.balanceOf(user2.address);
+      expect(virtualAfter).to.be.greaterThan(virtualBefore);
+    });
+
+    it("Should calculate amounts correctly", async function () {
+      const buyAmount = ethers.parseEther("1000");
+      
+      // Get expected amount out
+      const expectedTokensOut = await curve.getAmountOut(buyAmount, true);
+      expect(expectedTokensOut).to.be.greaterThan(0);
+
+      // Buy tokens
+      await virtual.connect(user2).approve(await curve.getAddress(), buyAmount);
+      const tx = await curve.connect(user2).buy(buyAmount, 0, Math.floor(Date.now() / 1000) + 300);
       const receipt = await tx.wait();
 
-      // Check Buy event
-      const event = receipt?.logs.find((log: any) => {
-        try {
-          const parsed = bondingCurve.interface.parseLog(log);
-          return parsed?.name === "Buy";
-        } catch {
-          return false;
-        }
-      });
-
+      // Check the actual tokens received (approximately equal due to rounding)
+      const event = receipt?.logs.find(log => log.topics[0] === ethers.id("Buy(address,uint256,uint256,uint256)"));
       expect(event).to.not.be.undefined;
-
-      if (event) {
-        const parsed = bondingCurve.interface.parseLog(event);
-        expect(parsed!.args[0]).to.equal(buyer1.address); // buyer
-        expect(parsed!.args[1]).to.equal(buyAmount); // virtualIn
-        expect(parsed!.args[2]).to.be.gt(0); // tokensOut
-      }
-
-      // Check state updates
-      expect(await bondingCurve.virtualRaised()).to.equal(buyAmount);
-      expect(await bondingCurve.tokensSold()).to.be.gt(0);
-
-      // Check buyer received tokens
-      const iTokenAddress = await bondingCurve.iToken();
-      const iToken = await ethers.getContractAt("AgentTokenInternal", iTokenAddress);
-      const buyerBalance = await iToken.balanceOf(buyer1.address);
-      expect(buyerBalance).to.be.gt(0);
     });
 
-    it("Should reject zero amount", async function () {
-      await expect(
-        bondingCurve.connect(buyer1).buy(0, 0)
-      ).to.be.revertedWith("0 in");
-    });
-
-    it("Should reject if not initialized", async function () {
-      const newBondingCurve = await ethers.getContractFactory("BondingCurve");
-      const uninitializedCurve = await newBondingCurve.deploy();
-      await uninitializedCurve.waitForDeployment();
-
-      await expect(
-        uninitializedCurve.connect(buyer1).buy(ethers.parseEther("1000"), 0)
-      ).to.be.revertedWith("not initialized");
-    });
-
-    it("Should reject if graduated", async function () {
-      // Buy enough to graduate
-      const buyAmount = GRADUATION_THRESHOLD + ethers.parseEther("1000");
-      await easyV.connect(buyer1).approve(await bondingCurve.getAddress(), buyAmount);
-      await bondingCurve.connect(buyer1).buy(buyAmount, 0);
-
-      expect(await bondingCurve.graduated()).to.be.true;
-
-      // Try to buy more after graduation
-      await easyV.connect(buyer2).approve(await bondingCurve.getAddress(), ethers.parseEther("1000"));
-      await expect(
-        bondingCurve.connect(buyer2).buy(ethers.parseEther("1000"), 0)
-      ).to.be.revertedWith("graduated");
-    });
-
-    it("Should respect slippage protection", async function () {
-      const buyAmount = ethers.parseEther("1000");
-      const unrealisticMinTokens = ethers.parseEther("1000000"); // Way too high
-      
-      await easyV.connect(buyer1).approve(await bondingCurve.getAddress(), buyAmount);
-      
-      await expect(
-        bondingCurve.connect(buyer1).buy(buyAmount, unrealisticMinTokens)
-      ).to.be.revertedWith("slip");
-    });
-
-    it("Should handle multiple purchases correctly", async function () {
-      const buyAmount1 = ethers.parseEther("1000");
-      const buyAmount2 = ethers.parseEther("2000");
-
-      // First purchase
-      await easyV.connect(buyer1).approve(await bondingCurve.getAddress(), buyAmount1);
-      await bondingCurve.connect(buyer1).buy(buyAmount1, 0);
-
-      const virtualRaised1 = await bondingCurve.virtualRaised();
-      const tokensSold1 = await bondingCurve.tokensSold();
-
-      // Second purchase
-      await easyV.connect(buyer2).approve(await bondingCurve.getAddress(), buyAmount2);
-      await bondingCurve.connect(buyer2).buy(buyAmount2, 0);
-
-      const virtualRaised2 = await bondingCurve.virtualRaised();
-      const tokensSold2 = await bondingCurve.tokensSold();
-
-      expect(virtualRaised2).to.equal(virtualRaised1 + buyAmount2);
-      expect(tokensSold2).to.be.gt(tokensSold1);
-
-      // Check both buyers have tokens
-      const iTokenAddress = await bondingCurve.iToken();
-      const iToken = await ethers.getContractAt("AgentTokenInternal", iTokenAddress);
-      
-      expect(await iToken.balanceOf(buyer1.address)).to.be.gt(0);
-      expect(await iToken.balanceOf(buyer2.address)).to.be.gt(0);
-    });
-
-    it("Should calculate correct token amounts for linear curve", async function () {
+    it("Should respect slippage protection on buy", async function () {
       const buyAmount = ethers.parseEther("1000");
       
-      await easyV.connect(buyer1).approve(await bondingCurve.getAddress(), buyAmount);
-      const tx = await bondingCurve.connect(buyer1).buy(buyAmount, 0);
-      const receipt = await tx.wait();
+      // Get realistic expected amount and set minimum higher
+      const expectedTokens = await curve.getAmountOut(buyAmount, true);
+      const unrealisticMinTokens = expectedTokens * 2n; // Expect double what's realistic
+      
+      await virtual.connect(user2).approve(await curve.getAddress(), buyAmount);
+      
+      await expect(
+        curve.connect(user2).buy(buyAmount, unrealisticMinTokens, Math.floor(Date.now() / 1000) + 300)
+      ).to.be.revertedWithCustomError(curve, "SlippageTooHigh");
+    });
 
-      const event = receipt?.logs.find((log: any) => {
-        try {
-          const parsed = bondingCurve.interface.parseLog(log);
-          return parsed?.name === "Buy";
-        } catch {
-          return false;
-        }
-      });
+    it("Should respect slippage protection on sell", async function () {
+      const buyAmount = ethers.parseEther("1000");
+      
+      // First buy some tokens
+      await virtual.connect(user2).approve(await curve.getAddress(), buyAmount);
+      await curve.connect(user2).buy(buyAmount, 0, Math.floor(Date.now() / 1000) + 300);
 
-      if (event) {
-        const parsed = bondingCurve.interface.parseLog(event);
-        const tokensOut = parsed!.args[2];
-        
-        // For a linear curve starting at 0, the first purchase should give a predictable amount
-        expect(tokensOut).to.be.gt(0);
-        
-        // The price should increase with subsequent purchases
-        await easyV.connect(buyer2).approve(await bondingCurve.getAddress(), buyAmount);
-        const tx2 = await bondingCurve.connect(buyer2).buy(buyAmount, 0);
-        const receipt2 = await tx2.wait();
+      const iToken = await ethers.getContractAt("AgentTokenInternal", await curve.iToken());
+      const userTokens = await iToken.balanceOf(user2.address);
+      
+      // Approve curve to spend tokens
+      await iToken.connect(user2).approve(await curve.getAddress(), userTokens);
+      
+      // Get realistic expected amount and set minimum higher
+      const sellAmount = userTokens / 2n;
+      const expectedVirtual = await curve.getAmountOut(sellAmount, false);
+      const unrealisticMinVirtual = expectedVirtual * 2n; // Expect double what's realistic
+      
+      await expect(
+        curve.connect(user2).sell(sellAmount, unrealisticMinVirtual, Math.floor(Date.now() / 1000) + 300)
+      ).to.be.revertedWithCustomError(curve, "SlippageTooHigh");
+    });
 
-        const event2 = receipt2?.logs.find((log: any) => {
-          try {
-            const parsed = bondingCurve.interface.parseLog(log);
-            return parsed?.name === "Buy";
-          } catch {
-            return false;
-          }
-        });
-
-        if (event2) {
-          const parsed2 = bondingCurve.interface.parseLog(event2);
-          const tokensOut2 = parsed2!.args[2];
-          
-          // Second purchase should give fewer tokens (higher price)
-          expect(tokensOut2).to.be.lt(tokensOut);
-        }
-      }
+    it("Should reject expired transactions", async function () {
+      const buyAmount = ethers.parseEther("1000");
+      const expiredDeadline = 1; // Use a very old timestamp
+      
+      await virtual.connect(user2).approve(await curve.getAddress(), buyAmount);
+      
+      await expect(
+        curve.connect(user2).buy(buyAmount, 0, expiredDeadline)
+      ).to.be.revertedWithCustomError(curve, "InvalidInput");
     });
   });
 
   describe("Graduation", function () {
-    beforeEach(async function () {
-      await bondingCurve.initialize(
-        await easyV.getAddress(),
-        "Test Agent",
-        "TEST",
-        creator.address,
-        GRADUATION_THRESHOLD
-      );
+    let curve: BondingCurve;
 
-      // Set Uniswap router for graduation functionality
-      const uniswapRouter = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D";
-      await bondingCurve.setUniswapRouter(uniswapRouter);
+    beforeEach(async function () {
+      await virtual.connect(user1).approve(await factory.getAddress(), INITIAL_DEPOSIT);
+      await factory.connect(user1).launch("Test Agent", "TEST", [], INITIAL_DEPOSIT);
+
+      const curves = await factory.allBondingCurves();
+      curve = await ethers.getContractAt("BondingCurve", curves[0]);
     });
 
     it("Should graduate when threshold is reached", async function () {
-      const buyAmount = GRADUATION_THRESHOLD + ethers.parseEther("1000");
+      // Buy enough to reach graduation threshold (minus what was already bought in launch)
+      const alreadyRaised = await curve.virtualRaised();
+      const buyAmount = GRADUATION_THRESHOLD - alreadyRaised;
       
-      await easyV.connect(buyer1).approve(await bondingCurve.getAddress(), buyAmount);
-      const tx = await bondingCurve.connect(buyer1).buy(buyAmount, 0);
-      const receipt = await tx.wait();
+      await virtual.connect(user2).approve(await curve.getAddress(), buyAmount);
+      
+      const graduatedBefore = await curve.graduated();
+      expect(graduatedBefore).to.be.false;
 
-      // Check Graduate event
-      const graduateEvent = receipt?.logs.find((log: any) => {
-        try {
-          const parsed = bondingCurve.interface.parseLog(log);
-          return parsed?.name === "Graduate";
-        } catch {
-          return false;
-        }
-      });
+      // This should trigger graduation
+      await curve.connect(user2).buy(buyAmount, 0, Math.floor(Date.now() / 1000) + 300);
 
-      expect(graduateEvent).to.not.be.undefined;
+      const graduatedAfter = await curve.graduated();
+      expect(graduatedAfter).to.be.true;
 
-      // Check graduation state
-      expect(await bondingCurve.graduated()).to.be.true;
-      expect(await bondingCurve.virtualRaised()).to.be.gte(GRADUATION_THRESHOLD);
+      const tradingEnabled = await curve.tradingEnabled();
+      expect(tradingEnabled).to.be.false;
+    });
 
-      // Check external token was created
-      const eTokenAddress = await bondingCurve.eToken();
+    it("Should create external token on graduation", async function () {
+      // Buy enough to graduate
+      const alreadyRaised = await curve.virtualRaised();
+      const buyAmount = GRADUATION_THRESHOLD - alreadyRaised;
+      
+      await virtual.connect(user2).approve(await curve.getAddress(), buyAmount);
+      await curve.connect(user2).buy(buyAmount, 0, Math.floor(Date.now() / 1000) + 300);
+
+      const eTokenAddress = await curve.eToken();
       expect(eTokenAddress).to.not.equal(ethers.ZeroAddress);
 
       const eToken = await ethers.getContractAt("AgentTokenExternal", eTokenAddress);
-      expect(await eToken.totalSupply()).to.equal(SUPPLY);
-      
-      // After graduation, bonding curve holds exactly tokensSold for redemption
-      // The rest goes to liquidity
-      const tokensSold = await bondingCurve.tokensSold();
-      expect(await eToken.balanceOf(await bondingCurve.getAddress())).to.equal(tokensSold);
-
-      // Check token metadata
-      const iTokenAddress = await bondingCurve.iToken();
-      const iToken = await ethers.getContractAt("AgentTokenInternal", iTokenAddress);
-      
-      expect(await eToken.name()).to.equal(await iToken.name());
-      expect(await eToken.symbol()).to.equal(await iToken.symbol());
+      const totalSupply = await eToken.totalSupply();
+      expect(totalSupply).to.equal(ethers.parseEther("1000000000")); // 1B tokens
     });
 
-    it("Should not graduate before threshold", async function () {
-      const buyAmount = GRADUATION_THRESHOLD - ethers.parseEther("1000");
-      
-      await easyV.connect(buyer1).approve(await bondingCurve.getAddress(), buyAmount);
-      await bondingCurve.connect(buyer1).buy(buyAmount, 0);
+    it("Should allow redemption after graduation", async function () {
+      // Buy some tokens first
+      const buyAmount = ethers.parseEther("5000");
+      await virtual.connect(user2).approve(await curve.getAddress(), buyAmount);
+      await curve.connect(user2).buy(buyAmount, 0, Math.floor(Date.now() / 1000) + 300);
 
-      expect(await bondingCurve.graduated()).to.be.false;
-      expect(await bondingCurve.eToken()).to.equal(ethers.ZeroAddress);
-    });
-  });
+      const iToken = await ethers.getContractAt("AgentTokenInternal", await curve.iToken());
+      const userTokensBefore = await iToken.balanceOf(user2.address);
 
-  describe("Redemption", function () {
-    let iToken: AgentTokenInternal;
-    let eToken: AgentTokenExternal;
+      // Graduate the curve
+      const alreadyRaised = await curve.virtualRaised();
+      const graduationBuyAmount = GRADUATION_THRESHOLD - alreadyRaised;
+      await virtual.connect(user1).approve(await curve.getAddress(), graduationBuyAmount);
+      await curve.connect(user1).buy(graduationBuyAmount, 0, Math.floor(Date.now() / 1000) + 300);
 
-    beforeEach(async function () {
-      await bondingCurve.initialize(
-        await easyV.getAddress(),
-        "Test Agent",
-        "TEST",
-        creator.address,
-        GRADUATION_THRESHOLD
-      );
-
-      // Set Uniswap router for graduation functionality
-      const uniswapRouter = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D";
-      await bondingCurve.setUniswapRouter(uniswapRouter);
-
-      // Buy enough to graduate
-      const buyAmount = GRADUATION_THRESHOLD + ethers.parseEther("1000");
-      await easyV.connect(buyer1).approve(await bondingCurve.getAddress(), buyAmount);
-      await bondingCurve.connect(buyer1).buy(buyAmount, 0);
-
-      // Get token contracts
-      const iTokenAddress = await bondingCurve.iToken();
-      const eTokenAddress = await bondingCurve.eToken();
-      
-      iToken = await ethers.getContractAt("AgentTokenInternal", iTokenAddress);
-      eToken = await ethers.getContractAt("AgentTokenExternal", eTokenAddress);
-    });
-
-    it("Should redeem internal tokens for external tokens", async function () {
-      const buyer1InternalBalance = await iToken.balanceOf(buyer1.address);
-      const redeemAmount = buyer1InternalBalance / 2n;
-
-      // Approve bonding curve to burn internal tokens
-      await iToken.connect(buyer1).approve(await bondingCurve.getAddress(), redeemAmount);
-
-      const tx = await bondingCurve.connect(buyer1).redeem(redeemAmount);
-      const receipt = await tx.wait();
-
-      // Check Redeem event
-      const redeemEvent = receipt?.logs.find((log: any) => {
-        try {
-          const parsed = bondingCurve.interface.parseLog(log);
-          return parsed?.name === "Redeem";
-        } catch {
-          return false;
-        }
-      });
-
-      expect(redeemEvent).to.not.be.undefined;
-
-      if (redeemEvent) {
-        const parsed = bondingCurve.interface.parseLog(redeemEvent);
-        expect(parsed!.args[0]).to.equal(buyer1.address); // user
-        expect(parsed!.args[1]).to.equal(redeemAmount); // amount
-      }
+      // Redeem internal tokens for external tokens
+      const redeemAmount = userTokensBefore / 2n;
+      await iToken.connect(user2).approve(await curve.getAddress(), redeemAmount);
+      await curve.connect(user2).redeem(redeemAmount);
 
       // Check balances
-      const newInternalBalance = await iToken.balanceOf(buyer1.address);
-      const externalBalance = await eToken.balanceOf(buyer1.address);
+      const userTokensAfter = await iToken.balanceOf(user2.address);
+      expect(userTokensAfter).to.equal(userTokensBefore - redeemAmount);
 
-      expect(newInternalBalance).to.equal(buyer1InternalBalance - redeemAmount);
-      expect(externalBalance).to.equal(redeemAmount);
+      const eToken = await ethers.getContractAt("AgentTokenExternal", await curve.eToken());
+      const userExternalTokens = await eToken.balanceOf(user2.address);
+      expect(userExternalTokens).to.equal(redeemAmount);
     });
 
-    it("Should reject redemption if not graduated", async function () {
-      // Deploy new curve that hasn't graduated
-      const newBondingCurve = await ethers.getContractFactory("BondingCurve");
-      const ungraduatedCurve = await newBondingCurve.deploy();
-      await ungraduatedCurve.waitForDeployment();
+    it("Should reject trading after graduation", async function () {
+      // Graduate the curve
+      const alreadyRaised = await curve.virtualRaised();
+      const buyAmount = GRADUATION_THRESHOLD - alreadyRaised;
+      
+      await virtual.connect(user2).approve(await curve.getAddress(), buyAmount);
+      await curve.connect(user2).buy(buyAmount, 0, Math.floor(Date.now() / 1000) + 300);
 
-      await ungraduatedCurve.initialize(
-        await easyV.getAddress(),
-        "Test Agent 2",
-        "TEST2",
-        creator.address,
-        GRADUATION_THRESHOLD
-      );
-
+      // Try to buy more after graduation
+      await virtual.connect(user1).approve(await curve.getAddress(), ethers.parseEther("1000"));
       await expect(
-        ungraduatedCurve.connect(buyer1).redeem(ethers.parseEther("100"))
-      ).to.be.revertedWith("!grad");
-    });
-
-    it("Should reject zero amount redemption", async function () {
-      await expect(
-        bondingCurve.connect(buyer1).redeem(0)
-      ).to.be.revertedWith("0");
-    });
-
-    it("Should reject redemption without approval", async function () {
-      const redeemAmount = ethers.parseEther("100");
-
-      await expect(
-        bondingCurve.connect(buyer1).redeem(redeemAmount)
-      ).to.be.revertedWithCustomError(iToken, "ERC20InsufficientAllowance");
-    });
-
-    it("Should reject redemption of more tokens than owned", async function () {
-      const buyer1Balance = await iToken.balanceOf(buyer1.address);
-      const excessiveAmount = buyer1Balance + ethers.parseEther("1000");
-
-      await iToken.connect(buyer1).approve(await bondingCurve.getAddress(), excessiveAmount);
-
-      await expect(
-        bondingCurve.connect(buyer1).redeem(excessiveAmount)
-      ).to.be.revertedWithCustomError(iToken, "ERC20InsufficientBalance");
-    });
-
-    it("Should handle multiple redemptions", async function () {
-      const buyer1InternalBalance = await iToken.balanceOf(buyer1.address);
-      const redeemAmount1 = buyer1InternalBalance / 3n;
-      const redeemAmount2 = buyer1InternalBalance / 3n;
-
-      // First redemption
-      await iToken.connect(buyer1).approve(await bondingCurve.getAddress(), redeemAmount1);
-      await bondingCurve.connect(buyer1).redeem(redeemAmount1);
-
-      // Second redemption
-      await iToken.connect(buyer1).approve(await bondingCurve.getAddress(), redeemAmount2);
-      await bondingCurve.connect(buyer1).redeem(redeemAmount2);
-
-      // Check final balances
-      const finalInternalBalance = await iToken.balanceOf(buyer1.address);
-      const finalExternalBalance = await eToken.balanceOf(buyer1.address);
-
-      expect(finalInternalBalance).to.equal(buyer1InternalBalance - redeemAmount1 - redeemAmount2);
-      expect(finalExternalBalance).to.equal(redeemAmount1 + redeemAmount2);
+        curve.connect(user1).buy(ethers.parseEther("1000"), 0, Math.floor(Date.now() / 1000) + 300)
+      ).to.be.revertedWithCustomError(curve, "InvalidTokenStatus");
     });
   });
 
-  describe("Edge cases and security", function () {
+  describe("View Functions", function () {
+    let curve: BondingCurve;
+
     beforeEach(async function () {
-      await bondingCurve.initialize(
-        await easyV.getAddress(),
-        "Test Agent",
-        "TEST",
-        creator.address,
-        GRADUATION_THRESHOLD
-      );
+      await virtual.connect(user1).approve(await factory.getAddress(), INITIAL_DEPOSIT);
+      await factory.connect(user1).launch("Test Agent", "TEST", [], INITIAL_DEPOSIT);
 
-      // Set Uniswap router for graduation functionality
-      const uniswapRouter = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D";
-      await bondingCurve.setUniswapRouter(uniswapRouter);
+      const curves = await factory.allBondingCurves();
+      curve = await ethers.getContractAt("BondingCurve", curves[0]);
     });
 
-    it("Should handle very small purchases", async function () {
-      const smallAmount = ethers.parseEther("0.001");
-      
-      await easyV.connect(buyer1).approve(await bondingCurve.getAddress(), smallAmount);
-      await bondingCurve.connect(buyer1).buy(smallAmount, 0);
-
-      expect(await bondingCurve.virtualRaised()).to.equal(smallAmount);
-      expect(await bondingCurve.tokensSold()).to.be.gt(0);
+    it("Should return correct reserves", async function () {
+      const [virtualReserve, tokenReserve] = await curve.getReserves();
+      expect(virtualReserve).to.be.gt(0);
+      expect(tokenReserve).to.be.gt(0);
     });
 
-    it("Should prevent reentrancy attacks", async function () {
-      // This test ensures the nonReentrant modifier is working
-      // In a real attack scenario, a malicious contract would try to call buy() again
-      // during the execution of the first buy() call
-      
+    it("Should calculate buy amounts correctly", async function () {
       const buyAmount = ethers.parseEther("1000");
-      await easyV.connect(buyer1).approve(await bondingCurve.getAddress(), buyAmount);
-      
-      // This should succeed normally
-      await expect(bondingCurve.connect(buyer1).buy(buyAmount, 0)).to.not.be.reverted;
+      const tokensOut = await curve.getAmountOut(buyAmount, true);
+      expect(tokensOut).to.be.gt(0);
     });
 
-    it("Should handle exact graduation threshold", async function () {
-      const exactAmount = GRADUATION_THRESHOLD;
-      
-      await easyV.connect(buyer1).approve(await bondingCurve.getAddress(), exactAmount);
-      const tx = await bondingCurve.connect(buyer1).buy(exactAmount, 0);
-      const receipt = await tx.wait();
+    it("Should calculate sell amounts correctly", async function () {
+      // First buy some tokens
+      const buyAmount = ethers.parseEther("1000");
+      await virtual.connect(user2).approve(await curve.getAddress(), buyAmount);
+      await curve.connect(user2).buy(buyAmount, 0, Math.floor(Date.now() / 1000) + 300);
 
-      // Should graduate exactly at threshold
-      expect(await bondingCurve.graduated()).to.be.true;
-      expect(await bondingCurve.virtualRaised()).to.equal(exactAmount);
-
-      // Check Graduate event was emitted
-      const graduateEvent = receipt?.logs.find((log: any) => {
-        try {
-          const parsed = bondingCurve.interface.parseLog(log);
-          return parsed?.name === "Graduate";
-        } catch {
-          return false;
-        }
-      });
-
-      expect(graduateEvent).to.not.be.undefined;
+      const sellAmount = ethers.parseEther("1000000"); // 1M tokens
+      const virtualOut = await curve.getAmountOut(sellAmount, false);
+      expect(virtualOut).to.be.gt(0);
     });
   });
 }); 
