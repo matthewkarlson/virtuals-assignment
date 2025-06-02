@@ -281,15 +281,6 @@ with hyperbola_col2:
         default_k = initial_supply * default_liquidity
         k_ratio = k_value / default_k
         st.write(f"**vs Default k:** {k_ratio:.2f}x")
-     
-    st.markdown("""
-    **Key Insights:**
-    - Lower asset rate → Higher k → Curve further from origin
-    - Higher asset rate → Lower k → Curve closer to origin
-    - All points on the curve satisfy x × y = k
-    - Moving right on curve = selling tokens
-    - Moving up on curve = buying tokens
-    """)
 
 # Trading Simulator Section
 st.subheader("🔄 Interactive Trading Simulator")
@@ -735,43 +726,43 @@ st.plotly_chart(fig_live, use_container_width=True)
 # Trading interface
 if not has_graduated:
     st.subheader("💰 Manual Trading")
-col3, col4 = st.columns(2)
+    col3, col4 = st.columns(2)
 
-with col3:
+    with col3:
         st.write("**🟢 Buy Tokens**")
         virtuals_to_spend = st.number_input(
-        "Virtuals to spend", 
-        min_value=1.0, 
-            max_value=float(st.session_state.current_virtuals_reserve * 0.3), 
-        value=1000.0, 
+            "Virtuals to spend", 
+            min_value=1.0, 
+            max_value=float(st.session_state.current_virtuals_reserve * 0.9), 
+            value=1000.0, 
             step=1.0,
             key="buy_input"
-    )
-    
+        )
+        
         if virtuals_to_spend > 0:
             tokens_received = calculate_buy_amount_out(
                 virtuals_to_spend, 
                 st.session_state.current_token_reserve, 
                 st.session_state.current_virtuals_reserve
-        )
-        
-        # Calculate new state
-        new_virtuals_reserve = st.session_state.current_virtuals_reserve + virtuals_to_spend
-        new_token_reserve = st.session_state.current_token_reserve - tokens_received
-        new_price = calculate_price_from_reserves(new_token_reserve, new_virtuals_reserve)
-        
-        price_impact = ((new_price / current_price - 1) * 100) if current_price > 0 else 0
-        
-        st.write(f"**Tokens received:** {tokens_received:,.0f}")
-        st.write(f"**New price:** {new_price:.8f} Virtuals/Token")
-        st.write(f"**Price impact:** {price_impact:.2f}%")
-        
-        # Check if this would trigger graduation
-        will_graduate = new_token_reserve <= graduation_token_threshold
-        if will_graduate:
+            )
+            
+            # Calculate new state
+            new_virtuals_reserve = st.session_state.current_virtuals_reserve + virtuals_to_spend
+            new_token_reserve = st.session_state.current_token_reserve - tokens_received
+            new_price = calculate_price_from_reserves(new_token_reserve, new_virtuals_reserve)
+            
+            price_impact = ((new_price / current_price - 1) * 100) if current_price > 0 else 0
+            
+            st.write(f"**Tokens received:** {tokens_received:,.0f}")
+            st.write(f"**New price:** {new_price:.8f} Virtuals/Token")
+            st.write(f"**Price impact:** {price_impact:.2f}%")
+            
+            # Check if this would trigger graduation
+            will_graduate = new_token_reserve <= graduation_token_threshold
+            if will_graduate:
                 st.warning("⚠️ This trade will trigger graduation!")
             
-        if st.button("Execute Buy Trade", key="execute_buy"):
+            if st.button("Execute Buy Trade", key="execute_buy"):
                 # Execute the trade
                 st.session_state.current_virtuals_reserve = new_virtuals_reserve
                 st.session_state.current_token_reserve = new_token_reserve
@@ -789,55 +780,55 @@ with col3:
                 st.success(f"✅ Bought {tokens_received:,.0f} tokens for {virtuals_to_spend:,.0f} Virtuals!")
                 st.rerun()
 
-        with col4:
-            st.write("**🔴 Sell Tokens**")
-            max_sellable = st.session_state.total_tokens_sold * 0.9  # Can't sell more than 90% of what you bought
-            
-            if max_sellable > 0:
-                tokens_to_sell = st.number_input(
-            "Tokens to sell", 
-            min_value=1.0, 
-                    max_value=float(max_sellable), 
-                    value=min(10000.0, max_sellable), 
-                    step=1.0,
-                    key="sell_input"
-        )
-    
-        if tokens_to_sell > 0:
-            virtuals_received = calculate_sell_amount_out(
-                        tokens_to_sell, 
-                        st.session_state.current_token_reserve, 
-                        st.session_state.current_virtuals_reserve
+    with col4:
+        st.write("**🔴 Sell Tokens**")
+        max_sellable = st.session_state.total_tokens_sold * 0.99  # Can't sell more than 90% of what you bought
+        
+        if max_sellable > 0:
+            tokens_to_sell = st.number_input(
+                "Tokens to sell", 
+                min_value=1.0, 
+                max_value=float(max_sellable), 
+                value=min(10000.0, max_sellable), 
+                step=1.0,
+                key="sell_input"
             )
-        
-        # Calculate new state
-        new_virtuals_reserve = st.session_state.current_virtuals_reserve - virtuals_received
-        new_token_reserve = st.session_state.current_token_reserve + tokens_to_sell
-        new_price = calculate_price_from_reserves(new_token_reserve, new_virtuals_reserve)
-        
-        price_impact = ((new_price / current_price - 1) * 100) if current_price > 0 else 0
-        
-        st.write(f"**Virtuals received:** {virtuals_received:,.2f}")
-        st.write(f"**New price:** {new_price:.8f} Virtuals/Token")
-        st.write(f"**Price impact:** {price_impact:.2f}%")
+            
+            if tokens_to_sell > 0:
+                virtuals_received = calculate_sell_amount_out(
+                    tokens_to_sell, 
+                    st.session_state.current_token_reserve, 
+                    st.session_state.current_virtuals_reserve
+                )
                 
-        if st.button("Execute Sell Trade", key="execute_sell"):
-           # Execute the trade
-           st.session_state.current_virtuals_reserve = new_virtuals_reserve
-           st.session_state.current_token_reserve = new_token_reserve
-           st.session_state.total_tokens_sold = max(0, st.session_state.total_tokens_sold - tokens_to_sell)
-           
-           # Add to transaction history
-           st.session_state.transaction_history.append({
-               'type': 'sell',
-               'tokens_in': tokens_to_sell,
-               'virtuals_out': virtuals_received,
-               'price': new_price,
-               'timestamp': len(st.session_state.transaction_history) + 1
-           })
-           
-           st.success(f"✅ Sold {tokens_to_sell:,.0f} tokens for {virtuals_received:,.2f} Virtuals!")
-           st.rerun()
+                # Calculate new state
+                new_virtuals_reserve = st.session_state.current_virtuals_reserve - virtuals_received
+                new_token_reserve = st.session_state.current_token_reserve + tokens_to_sell
+                new_price = calculate_price_from_reserves(new_token_reserve, new_virtuals_reserve)
+                
+                price_impact = ((new_price / current_price - 1) * 100) if current_price > 0 else 0
+                
+                st.write(f"**Virtuals received:** {virtuals_received:,.2f}")
+                st.write(f"**New price:** {new_price:.8f} Virtuals/Token")
+                st.write(f"**Price impact:** {price_impact:.2f}%")
+                
+                if st.button("Execute Sell Trade", key="execute_sell"):
+                    # Execute the trade
+                    st.session_state.current_virtuals_reserve = new_virtuals_reserve
+                    st.session_state.current_token_reserve = new_token_reserve
+                    st.session_state.total_tokens_sold = max(0, st.session_state.total_tokens_sold - tokens_to_sell)
+                    
+                    # Add to transaction history
+                    st.session_state.transaction_history.append({
+                        'type': 'sell',
+                        'tokens_in': tokens_to_sell,
+                        'virtuals_out': virtuals_received,
+                        'price': new_price,
+                        'timestamp': len(st.session_state.transaction_history) + 1
+                    })
+                    
+                    st.success(f"✅ Sold {tokens_to_sell:,.0f} tokens for {virtuals_received:,.2f} Virtuals!")
+                    st.rerun()
         else:
             st.info("💡 Buy some tokens first to enable selling!")
 
