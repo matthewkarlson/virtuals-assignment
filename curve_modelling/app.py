@@ -1,3 +1,4 @@
+import time
 import streamlit as st
 import numpy as np
 import pandas as pd
@@ -290,180 +291,598 @@ with hyperbola_col2:
     - Moving up on curve = buying tokens
     """)
 
-# Create columns for main content
-col1, col2 = st.columns([2, 1])
-
-with col1:
-    st.subheader("📈 Bonding Curve Visualization")
-    
-    # Generate curve data
-    tokens_sold, prices, market_caps, virtuals_reserves, token_reserves, virtuals_raised = generate_price_curve_data(
-        initial_supply, initial_virtuals_liquidity, graduation_token_threshold
-    )
-    
-    # Create subplots
-    fig = make_subplots(
-        rows=3, cols=1,
-        subplot_titles=('Price vs Tokens Sold', 'Virtuals Raised vs Tokens Sold', 'Reserve Levels vs Tokens Sold'),
-        vertical_spacing=0.12
-    )
-    
-    # Price curve
-    fig.add_trace(
-        go.Scatter(
-            x=tokens_sold, 
-            y=prices, 
-            mode='lines',
-            name='Token Price',
-            line=dict(color='#1f77b4', width=3)
-        ),
-        row=1, col=1
-    )
-    
-    # Virtuals raised curve
-    fig.add_trace(
-        go.Scatter(
-            x=tokens_sold, 
-            y=virtuals_raised, 
-            mode='lines',
-            name='Virtuals Raised',
-            line=dict(color='#ff7f0e', width=3),
-            showlegend=False
-        ),
-        row=2, col=1
-    )
-    
-    # Add graduation threshold line for Virtuals raised
-    fig.add_hline(
-        y=grad_threshold_virtuals, 
-        line_dash="dash", 
-        line_color="red",
-        annotation_text="Graduation Threshold",
-        row=2, col=1
-    )
-    
-    # Reserve levels
-    fig.add_trace(
-        go.Scatter(
-            x=tokens_sold, 
-            y=virtuals_reserves,
-            mode='lines',
-            name='Virtuals Reserve',
-            line=dict(color='#2ca02c', width=2)
-        ),
-        row=3, col=1
-    )
-    
-    fig.add_trace(
-        go.Scatter(
-            x=tokens_sold, 
-            y=token_reserves / 1000000,  # Scale to millions for visibility
-            mode='lines',
-            name='Token Reserve (M)',
-            line=dict(color='#d62728', width=2)
-        ),
-        row=3, col=1
-    )
-    
-    # Add graduation threshold line for token reserves
-    fig.add_hline(
-        y=graduation_token_threshold / 1000000, 
-        line_dash="dash", 
-        line_color="red",
-        annotation_text="Token Reserve at Graduation",
-        row=3, col=1
-    )
-    
-    fig.update_layout(height=800, showlegend=True)
-    fig.update_xaxes(title_text="Tokens Sold", row=1, col=1)
-    fig.update_xaxes(title_text="Tokens Sold", row=2, col=1) 
-    fig.update_xaxes(title_text="Tokens Sold", row=3, col=1)
-    fig.update_yaxes(title_text="Price (Virtuals/Token)", row=1, col=1)
-    fig.update_yaxes(title_text="Virtuals Raised", row=2, col=1)
-    fig.update_yaxes(title_text="Reserves", row=3, col=1)
-    
-    st.plotly_chart(fig, use_container_width=True)
-
-with col2:
-    st.subheader("💰 Current State")
-    
-    # Display current metrics
-    st.metric("Initial Price", f"{initial_price:.8f} Virtuals/Token")
-    st.metric("Initial Virtuals Liquidity", f"{initial_virtuals_liquidity:,.0f} Virtuals")
-    st.metric("Token Supply", f"{initial_supply:,.0f}")
-    st.metric("Constant Product (k)", f"{(initial_supply * initial_virtuals_liquidity):,.0f}")
-    
-    # Show graduation info
-    st.subheader("🎓 Graduation Info")
-    tokens_to_sell_for_grad = initial_supply - graduation_token_threshold
-    st.metric("Tokens to Sell for Graduation", f"{tokens_to_sell_for_grad:,.0f}")
-    st.metric("% of Supply to Sell", f"{(tokens_to_sell_for_grad/initial_supply)*100:.1f}%")
-    st.metric("Virtuals Needed", f"{grad_threshold_virtuals:,}")
-    
-    # Show key contract parameters
-    st.subheader("🔧 Contract Parameters")
-    st.metric("K Constant", f"{K_CONSTANT:,}")
-    st.metric("Asset Rate", asset_rate)
-
 # Trading Simulator Section
-st.subheader("🔄 Trading Simulator")
+st.subheader("🔄 Interactive Trading Simulator")
+st.markdown("**Make real trades and watch how they affect the curve and reserves in real-time!**")
 
+# Initialize session state for tracking current reserves and transaction history
+if 'current_token_reserve' not in st.session_state:
+    st.session_state.current_token_reserve = initial_supply
+if 'current_virtuals_reserve' not in st.session_state:
+    st.session_state.current_virtuals_reserve = initial_virtuals_liquidity
+if 'transaction_history' not in st.session_state:
+    st.session_state.transaction_history = []
+if 'total_tokens_sold' not in st.session_state:
+    st.session_state.total_tokens_sold = 0
+if 'auto_trading' not in st.session_state:
+    st.session_state.auto_trading = False
+if 'auto_trade_count' not in st.session_state:
+    st.session_state.auto_trade_count = 0
+
+# Auto-trading logic (executes one trade per rerun)
+if st.session_state.auto_trading:
+    max_trades = 500  # Safety limit
+    
+    # Check if we should stop auto-trading
+    if (st.session_state.current_token_reserve <= graduation_token_threshold or 
+        st.session_state.auto_trade_count >= max_trades):
+        
+        st.session_state.auto_trading = False
+        if st.session_state.current_token_reserve <= graduation_token_threshold:
+            st.success(f"🎓 Auto-trading completed! Graduated after {st.session_state.auto_trade_count} trades!")
+        else:
+            st.warning(f"⚠️ Auto-trading stopped after {max_trades} trades (safety limit)")
+    else:
+        # Execute one trade
+        # 75% chance of buying, 25% chance of selling (bias towards graduation)
+        is_buy = np.random.random() < 0.60
+        
+        trade_executed = False
+        
+        if is_buy:
+            # Generate random buy amount using normal distribution
+            mean_virtuals = 1000
+            std_virtuals = 300
+            min_virtuals = 500
+            max_virtuals = min(st.session_state.current_virtuals_reserve * 0.2, 20000)
+            
+            virtuals_to_spend = max(min_virtuals, 
+                                  min(max_virtuals, 
+                                      np.random.normal(mean_virtuals, std_virtuals)))
+            
+            # Execute buy trade
+            tokens_received = calculate_buy_amount_out(
+                virtuals_to_spend, 
+                st.session_state.current_token_reserve, 
+                st.session_state.current_virtuals_reserve
+            )
+            
+            if tokens_received > 0:
+                new_virtuals_reserve = st.session_state.current_virtuals_reserve + virtuals_to_spend
+                new_token_reserve = st.session_state.current_token_reserve - tokens_received
+                new_price = calculate_price_from_reserves(new_token_reserve, new_virtuals_reserve)
+                
+                # Update state
+                st.session_state.current_virtuals_reserve = new_virtuals_reserve
+                st.session_state.current_token_reserve = new_token_reserve
+                st.session_state.total_tokens_sold += tokens_received
+                
+                # Add to history
+                st.session_state.transaction_history.append({
+                    'type': 'buy',
+                    'virtuals_in': virtuals_to_spend,
+                    'tokens_out': tokens_received,
+                    'price': new_price,
+                    'timestamp': len(st.session_state.transaction_history) + 1
+                })
+                
+                trade_executed = True
+                st.success(f"🤖 Auto-Buy #{st.session_state.auto_trade_count + 1}: {tokens_received:,.0f} tokens for {virtuals_to_spend:,.0f} Virtuals")
+        
+        else:
+            # Only sell if we have tokens to sell
+            if st.session_state.total_tokens_sold > 1000:
+                # Generate random sell amount
+                max_sellable = st.session_state.total_tokens_sold * 0.3
+                mean_tokens = min(5000, max_sellable * 0.5)
+                std_tokens = mean_tokens * 0.4
+                min_tokens = 500
+                
+                tokens_to_sell = max(min_tokens, 
+                                   min(max_sellable, 
+                                       np.random.normal(mean_tokens, std_tokens)))
+                
+                # Execute sell trade
+                virtuals_received = calculate_sell_amount_out(
+                    tokens_to_sell, 
+                    st.session_state.current_token_reserve, 
+                    st.session_state.current_virtuals_reserve
+                )
+                
+                if virtuals_received > 0:
+                    new_virtuals_reserve = st.session_state.current_virtuals_reserve - virtuals_received
+                    new_token_reserve = st.session_state.current_token_reserve + tokens_to_sell
+                    new_price = calculate_price_from_reserves(new_token_reserve, new_virtuals_reserve)
+                    
+                    # Update state
+                    st.session_state.current_virtuals_reserve = new_virtuals_reserve
+                    st.session_state.current_token_reserve = new_token_reserve
+                    st.session_state.total_tokens_sold = max(0, st.session_state.total_tokens_sold - tokens_to_sell)
+                    
+                    # Add to history
+                    st.session_state.transaction_history.append({
+                        'type': 'sell',
+                        'tokens_in': tokens_to_sell,
+                        'virtuals_out': virtuals_received,
+                        'price': new_price,
+                        'timestamp': len(st.session_state.transaction_history) + 1
+                    })
+                    
+                    trade_executed = True
+                    st.info(f"🤖 Auto-Sell #{st.session_state.auto_trade_count + 1}: {tokens_to_sell:,.0f} tokens for {virtuals_received:,.2f} Virtuals")
+        
+        if trade_executed:
+            st.session_state.auto_trade_count += 1
+            
+            # Show updated chart immediately after trade
+            st.subheader("📐 Live Trading Updates")
+            
+            # Create a quick update chart
+            fig_update = go.Figure()
+            
+            # Add the hyperbola curve
+            x_values, y_values, k_value = generate_hyperbola_data(initial_supply, initial_virtuals_liquidity)
+            fig_update.add_trace(
+                go.Scatter(
+                    x=x_values / 1_000_000,
+                    y=y_values,
+                    mode='lines',
+                    name='Bonding Curve',
+                    line=dict(color='lightblue', width=2)
+                )
+            )
+            
+            # Add transaction path
+            if len(st.session_state.transaction_history) > 0:
+                history_x = [initial_supply / 1_000_000]
+                history_y = [initial_virtuals_liquidity]
+                
+                temp_token_reserve = initial_supply
+                temp_virtuals_reserve = initial_virtuals_liquidity
+                
+                for tx in st.session_state.transaction_history:
+                    if tx['type'] == 'buy':
+                        temp_virtuals_reserve += tx['virtuals_in']
+                        temp_token_reserve -= tx['tokens_out']
+                    else:
+                        temp_virtuals_reserve -= tx['virtuals_out']
+                        temp_token_reserve += tx['tokens_in']
+                    
+                    history_x.append(temp_token_reserve / 1_000_000)
+                    history_y.append(temp_virtuals_reserve)
+                
+                fig_update.add_trace(
+                    go.Scatter(
+                        x=history_x,
+                        y=history_y,
+                        mode='lines+markers',
+                        name='Trading Path',
+                        line=dict(color='orange', width=4),
+                        marker=dict(size=8, color='orange')
+                    )
+                )
+                
+                # Highlight current position
+                fig_update.add_trace(
+                    go.Scatter(
+                        x=[st.session_state.current_token_reserve / 1_000_000],
+                        y=[st.session_state.current_virtuals_reserve],
+                        mode='markers',
+                        name='Current Position',
+                        marker=dict(color='red', size=20, symbol='circle')
+                    )
+                )
+            
+            # Add graduation point
+            fig_update.add_trace(
+                go.Scatter(
+                    x=[graduation_token_threshold / 1_000_000],
+                    y=[k_value / graduation_token_threshold],
+                    mode='markers',
+                    name='Graduation',
+                    marker=dict(color='green', size=15, symbol='star')
+                )
+            )
+            
+            fig_update.update_layout(
+                title=f"🤖 Auto-Trade #{st.session_state.auto_trade_count} - Live Update",
+                xaxis_title="Token Reserves (Millions)",
+                yaxis_title="Virtuals Reserves",
+                height=400,
+                showlegend=True
+            )
+            
+            st.plotly_chart(fig_update, use_container_width=True, key=f"auto_trade_{st.session_state.auto_trade_count}")
+        
+        # Continue auto-trading by triggering a rerun
+        time.sleep(0.1)  # Small delay to make it visible
+        st.rerun()
+
+# Reset button
+col_reset, col_auto, col_status = st.columns([1, 1, 2])
+with col_reset:
+    if st.button("🔄 Reset to Initial State"):
+        st.session_state.current_token_reserve = initial_supply
+        st.session_state.current_virtuals_reserve = initial_virtuals_liquidity
+        st.session_state.transaction_history = []
+        st.session_state.total_tokens_sold = 0
+        st.session_state.auto_trading = False
+        st.session_state.auto_trade_count = 0
+        st.rerun()
+
+with col_auto:
+    if not st.session_state.auto_trading:
+        if st.button("🎲 Start Auto Trading"):
+            st.session_state.auto_trading = True
+            st.session_state.auto_trade_count = 0
+            st.rerun()
+    else:
+        # Show stop button and progress during auto-trading
+        col_stop, col_progress = st.columns([1, 1])
+        with col_stop:
+            if st.button("⏹️ Stop Auto Trading"):
+                st.session_state.auto_trading = False
+                st.rerun()
+        with col_progress:
+            st.write(f"🤖 Trade #{st.session_state.auto_trade_count}")
+
+with col_status:
+    # Check if graduated
+    has_graduated = st.session_state.current_token_reserve <= graduation_token_threshold
+    if has_graduated:
+        st.success("🎓 **GRADUATED TO UNISWAP!** No more trading on bonding curve.")
+        if st.session_state.auto_trading:
+            st.session_state.auto_trading = False
+    else:
+        tokens_left_to_grad = st.session_state.current_token_reserve - graduation_token_threshold
+        st.info(f"📊 **{tokens_left_to_grad:,.0f}** more tokens need to be sold to graduate")
+
+# Current state display
+current_price = calculate_price_from_reserves(st.session_state.current_token_reserve, st.session_state.current_virtuals_reserve)
+virtuals_raised_so_far = st.session_state.current_virtuals_reserve - initial_virtuals_liquidity
+
+col_state1, col_state2, col_state3, col_state4 = st.columns(4)
+with col_state1:
+    st.metric("Current Price", f"{current_price:.8f}", delta=f"{((current_price/initial_price - 1)*100):+.2f}%" if current_price != initial_price else None)
+with col_state2:
+    st.metric("Token Reserve", f"{st.session_state.current_token_reserve:,.0f}")
+with col_state3:
+    st.metric("Virtuals Reserve", f"{st.session_state.current_virtuals_reserve:,.0f}")
+with col_state4:
+    st.metric("Virtuals Raised", f"{virtuals_raised_so_far:,.0f}", delta=f"{(virtuals_raised_so_far/grad_threshold_virtuals*100):.1f}% to grad")
+
+# Updated hyperbola with current position
+st.subheader("📐 Live Curve Position")
+fig_live = go.Figure()
+
+# Add the hyperbola curve
+x_values, y_values, k_value = generate_hyperbola_data(initial_supply, initial_virtuals_liquidity)
+fig_live.add_trace(
+    go.Scatter(
+        x=x_values / 1_000_000,
+        y=y_values,
+        mode='lines',
+        name=f'Bonding Curve (k = {k_value:.2e})',
+        line=dict(color='lightblue', width=2, dash='dot')
+    )
+)
+
+# Mark the initial point
+fig_live.add_trace(
+    go.Scatter(
+        x=[initial_supply / 1_000_000],
+        y=[initial_virtuals_liquidity],
+        mode='markers',
+        name='Initial State',
+        marker=dict(color='gray', size=12, symbol='circle')
+    )
+)
+
+# Mark the graduation point
+fig_live.add_trace(
+    go.Scatter(
+        x=[graduation_token_threshold / 1_000_000],
+        y=[k_value / graduation_token_threshold],
+        mode='markers',
+        name='Graduation Point',
+        marker=dict(color='green', size=15, symbol='star')
+    )
+)
+
+# Add transaction history as a path
+if len(st.session_state.transaction_history) > 0:
+    history_x = [initial_supply / 1_000_000]
+    history_y = [initial_virtuals_liquidity]
+    
+    temp_token_reserve = initial_supply
+    temp_virtuals_reserve = initial_virtuals_liquidity
+    
+    for tx in st.session_state.transaction_history:
+        if tx['type'] == 'buy':
+            temp_virtuals_reserve += tx['virtuals_in']
+            temp_token_reserve -= tx['tokens_out']
+        else:  # sell
+            temp_virtuals_reserve -= tx['virtuals_out']
+            temp_token_reserve += tx['tokens_in']
+        
+        history_x.append(temp_token_reserve / 1_000_000)
+        history_y.append(temp_virtuals_reserve)
+    
+    # Add the full transaction path
+    fig_live.add_trace(
+        go.Scatter(
+            x=history_x,
+            y=history_y,
+            mode='lines+markers',
+            name='Trading Path',
+            line=dict(color='orange', width=4),
+            marker=dict(size=8, color='orange', opacity=0.7)
+        )
+    )
+    
+    # Highlight the last few trades with different colors
+    if len(history_x) >= 2:
+        # Last trade (most recent)
+        fig_live.add_trace(
+            go.Scatter(
+                x=[history_x[-1]],
+                y=[history_y[-1]],
+                mode='markers',
+                name='Latest Trade',
+                marker=dict(color='red', size=20, symbol='diamond', 
+                          line=dict(width=3, color='white'))
+            )
+        )
+        
+        # Second to last trade for direction arrow
+        if len(history_x) >= 3:
+            fig_live.add_annotation(
+                x=history_x[-1],
+                y=history_y[-1],
+                ax=history_x[-2],
+                ay=history_y[-2],
+                xref='x',
+                yref='y',
+                axref='x',
+                ayref='y',
+                showarrow=True,
+                arrowhead=2,
+                arrowsize=2,
+                arrowwidth=3,
+                arrowcolor='red',
+                opacity=0.8
+            )
+
+# Mark the current position with extra prominence
+fig_live.add_trace(
+    go.Scatter(
+        x=[st.session_state.current_token_reserve / 1_000_000],
+        y=[st.session_state.current_virtuals_reserve],
+        mode='markers',
+        name='Current Position',
+        marker=dict(color='red', size=25, symbol='circle', 
+                  line=dict(width=4, color='white'),
+                  opacity=0.9)
+    )
+)
+
+# Add auto-trading status indicator
+if st.session_state.auto_trading:
+    # Add pulsing effect annotation for auto-trading
+    fig_live.add_annotation(
+        x=st.session_state.current_token_reserve / 1_000_000,
+        y=st.session_state.current_virtuals_reserve,
+        text="🤖 AUTO TRADING",
+        showarrow=False,
+        font=dict(size=12, color="red"),
+        bgcolor="yellow",
+        bordercolor="red",
+        borderwidth=2,
+        xshift=0,
+        yshift=30
+    )
+
+# Add graduation progress indicator
+graduation_progress = ((initial_supply - st.session_state.current_token_reserve) / 
+                      (initial_supply - graduation_token_threshold)) * 100
+graduation_progress = min(100, max(0, graduation_progress))
+
+fig_live.add_annotation(
+    x=0.02,
+    y=0.98,
+    xref='paper',
+    yref='paper',
+    text=f"Graduation Progress: {graduation_progress:.1f}%",
+    showarrow=False,
+    font=dict(size=14, color="blue"),
+    bgcolor="lightblue",
+    bordercolor="blue",
+    borderwidth=1
+)
+
+# Add live metrics overlay
+current_price = calculate_price_from_reserves(st.session_state.current_token_reserve, st.session_state.current_virtuals_reserve)
+price_change = ((current_price / initial_price - 1) * 100) if initial_price > 0 else 0
+
+fig_live.add_annotation(
+    x=0.98,
+    y=0.98,
+    xref='paper',
+    yref='paper',
+    text=f"Current Price: {current_price:.6f}<br>Change: {price_change:+.1f}%<br>Trades: {len(st.session_state.transaction_history)}",
+    showarrow=False,
+    font=dict(size=12, color="darkblue"),
+    bgcolor="lightgray",
+    bordercolor="gray",
+    borderwidth=1,
+    align="right"
+)
+
+fig_live.update_layout(
+    title="Real-time Position on Bonding Curve",
+    xaxis_title="Token Reserves (Millions)",
+    yaxis_title="Virtuals Reserves",
+    height=500,
+    showlegend=True
+)
+
+# Add grid and improve styling
+fig_live.update_xaxes(showgrid=True, gridwidth=1, gridcolor='lightgray', zeroline=True)
+fig_live.update_yaxes(showgrid=True, gridwidth=1, gridcolor='lightgray', zeroline=True)
+
+st.plotly_chart(fig_live, use_container_width=True)
+
+# Trading interface
+if not has_graduated:
+    st.subheader("💰 Manual Trading")
 col3, col4 = st.columns(2)
 
 with col3:
-    st.write("**Buy Tokens**")
-    virtuals_to_spend = st.number_input(
+        st.write("**🟢 Buy Tokens**")
+        virtuals_to_spend = st.number_input(
         "Virtuals to spend", 
         min_value=1.0, 
-        max_value=float(initial_virtuals_liquidity * 0.5), 
+            max_value=float(st.session_state.current_virtuals_reserve * 0.3), 
         value=1000.0, 
-        step=1.0
+            step=1.0,
+            key="buy_input"
     )
     
-    if virtuals_to_spend > 0:
-        tokens_received = calculate_buy_amount_out(
-            virtuals_to_spend, initial_supply, initial_virtuals_liquidity
+        if virtuals_to_spend > 0:
+            tokens_received = calculate_buy_amount_out(
+                virtuals_to_spend, 
+                st.session_state.current_token_reserve, 
+                st.session_state.current_virtuals_reserve
         )
         
         # Calculate new state
-        new_virtuals_reserve = initial_virtuals_liquidity + virtuals_to_spend
-        new_token_reserve = initial_supply - tokens_received
+        new_virtuals_reserve = st.session_state.current_virtuals_reserve + virtuals_to_spend
+        new_token_reserve = st.session_state.current_token_reserve - tokens_received
         new_price = calculate_price_from_reserves(new_token_reserve, new_virtuals_reserve)
         
-        price_impact = ((new_price / initial_price - 1) * 100) if initial_price > 0 else 0
+        price_impact = ((new_price / current_price - 1) * 100) if current_price > 0 else 0
         
         st.write(f"**Tokens received:** {tokens_received:,.0f}")
         st.write(f"**New price:** {new_price:.8f} Virtuals/Token")
         st.write(f"**Price impact:** {price_impact:.2f}%")
-        st.write(f"**New token reserve:** {new_token_reserve:,.0f}")
         
         # Check if this would trigger graduation
-        if new_token_reserve <= graduation_token_threshold:
-            st.success("🎓 This trade would trigger graduation to Uniswap!")
+        will_graduate = new_token_reserve <= graduation_token_threshold
+        if will_graduate:
+                st.warning("⚠️ This trade will trigger graduation!")
+            
+        if st.button("Execute Buy Trade", key="execute_buy"):
+                # Execute the trade
+                st.session_state.current_virtuals_reserve = new_virtuals_reserve
+                st.session_state.current_token_reserve = new_token_reserve
+                st.session_state.total_tokens_sold += tokens_received
+                
+                # Add to transaction history
+                st.session_state.transaction_history.append({
+                    'type': 'buy',
+                    'virtuals_in': virtuals_to_spend,
+                    'tokens_out': tokens_received,
+                    'price': new_price,
+                    'timestamp': len(st.session_state.transaction_history) + 1
+                })
+                
+                st.success(f"✅ Bought {tokens_received:,.0f} tokens for {virtuals_to_spend:,.0f} Virtuals!")
+                st.rerun()
 
-with col4:
-    st.write("**Sell Tokens**")
-    tokens_to_sell = st.number_input(
-        "Tokens to sell", 
-        min_value=1.0, 
-        max_value=float(initial_supply * 0.1), 
-        value=10000.0, 
-        step=1.0
-    )
-    
-    if tokens_to_sell > 0:
-        virtuals_received = calculate_sell_amount_out(
-            tokens_to_sell, initial_supply, initial_virtuals_liquidity
+        with col4:
+            st.write("**🔴 Sell Tokens**")
+            max_sellable = st.session_state.total_tokens_sold * 0.9  # Can't sell more than 90% of what you bought
+            
+            if max_sellable > 0:
+                tokens_to_sell = st.number_input(
+            "Tokens to sell", 
+            min_value=1.0, 
+                    max_value=float(max_sellable), 
+                    value=min(10000.0, max_sellable), 
+                    step=1.0,
+                    key="sell_input"
         )
+    
+        if tokens_to_sell > 0:
+            virtuals_received = calculate_sell_amount_out(
+                        tokens_to_sell, 
+                        st.session_state.current_token_reserve, 
+                        st.session_state.current_virtuals_reserve
+            )
         
         # Calculate new state
-        new_virtuals_reserve = initial_virtuals_liquidity - virtuals_received
-        new_token_reserve = initial_supply + tokens_to_sell
+        new_virtuals_reserve = st.session_state.current_virtuals_reserve - virtuals_received
+        new_token_reserve = st.session_state.current_token_reserve + tokens_to_sell
         new_price = calculate_price_from_reserves(new_token_reserve, new_virtuals_reserve)
         
-        price_impact = ((new_price / initial_price - 1) * 100) if initial_price > 0 else 0
+        price_impact = ((new_price / current_price - 1) * 100) if current_price > 0 else 0
         
         st.write(f"**Virtuals received:** {virtuals_received:,.2f}")
         st.write(f"**New price:** {new_price:.8f} Virtuals/Token")
         st.write(f"**Price impact:** {price_impact:.2f}%")
-        st.write(f"**New token reserve:** {new_token_reserve:,.0f}")
+                
+        if st.button("Execute Sell Trade", key="execute_sell"):
+           # Execute the trade
+           st.session_state.current_virtuals_reserve = new_virtuals_reserve
+           st.session_state.current_token_reserve = new_token_reserve
+           st.session_state.total_tokens_sold = max(0, st.session_state.total_tokens_sold - tokens_to_sell)
+           
+           # Add to transaction history
+           st.session_state.transaction_history.append({
+               'type': 'sell',
+               'tokens_in': tokens_to_sell,
+               'virtuals_out': virtuals_received,
+               'price': new_price,
+               'timestamp': len(st.session_state.transaction_history) + 1
+           })
+           
+           st.success(f"✅ Sold {tokens_to_sell:,.0f} tokens for {virtuals_received:,.2f} Virtuals!")
+           st.rerun()
+        else:
+            st.info("💡 Buy some tokens first to enable selling!")
+
+# Transaction History
+if len(st.session_state.transaction_history) > 0:
+    st.subheader("📜 Transaction History")
+    
+    # Create transaction dataframe
+    tx_data = []
+    for i, tx in enumerate(st.session_state.transaction_history):
+        if tx['type'] == 'buy':
+            tx_data.append({
+                'Trade #': i + 1,
+                'Type': '🟢 BUY',
+                'Virtuals In': f"{tx['virtuals_in']:,.0f}",
+                'Tokens Out': f"{tx['tokens_out']:,.0f}",
+                'Price': f"{tx['price']:.8f}",
+                'Action': f"Spent {tx['virtuals_in']:,.0f} Virtuals → Got {tx['tokens_out']:,.0f} tokens"
+            })
+        else:
+            tx_data.append({
+                'Trade #': i + 1,
+                'Type': '🔴 SELL',
+                'Tokens In': f"{tx['tokens_in']:,.0f}",
+                'Virtuals Out': f"{tx['virtuals_out']:,.2f}",
+                'Price': f"{tx['price']:.8f}",
+                'Action': f"Sold {tx['tokens_in']:,.0f} tokens → Got {tx['virtuals_out']:,.2f} Virtuals"
+            })
+    
+    df = pd.DataFrame(tx_data)
+    st.dataframe(df, use_container_width=True, hide_index=True)
+    
+    # Summary stats
+    buy_trades = [tx for tx in st.session_state.transaction_history if tx['type'] == 'buy']
+    sell_trades = [tx for tx in st.session_state.transaction_history if tx['type'] == 'sell']
+    
+    summary_col1, summary_col2, summary_col3 = st.columns(3)
+    with summary_col1:
+        st.metric("Total Trades", len(st.session_state.transaction_history))
+    with summary_col2:
+        total_virtuals_spent = sum(tx['virtuals_in'] for tx in buy_trades)
+        st.metric("Total Virtuals Spent", f"{total_virtuals_spent:,.0f}")
+    with summary_col3:
+        total_tokens_bought = sum(tx['tokens_out'] for tx in buy_trades)
+        st.metric("Total Tokens Bought", f"{total_tokens_bought:,.0f}")
+
+else:
+    st.info("💡 Make your first trade to see the transaction history!")
