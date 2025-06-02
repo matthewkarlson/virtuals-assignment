@@ -1,30 +1,30 @@
 // Contract addresses from deployment
 export const CONTRACTS = {
-  EASYV: "0x43F48c3DC6df4674219923F2d4f8880d5E3CCC4c",
-  AGENT_FACTORY: "0x512F94E0a875516da53e2e59aC1995d6B2fbF781",
-  BONDING_CURVE_IMPL: "0x292E27B2b439Bb485265aBA27c131247B13593c1",
+  EASYV: "0x7E287bb62F87916c190b45BA0921F862Fb4b9Aa5",
+  AGENT_FACTORY: "0x72CC5BA2958CB688B00dFE2E578Db3BbB79eD311",
+  BONDING_CONTRACT: "0xC2D5F1C13e2603624a717409356DD48253f17319",
   // Uniswap V2 Router (for local testing - this would be different on mainnet)
   UNISWAP_ROUTER: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
 } as const;
 
 // Contract addresses - these will be set after deployment
 export const CONTRACT_ADDRESSES = {
-  EasyV: process.env.NEXT_PUBLIC_EASYV_ADDRESS || "0x43F48c3DC6df4674219923F2d4f8880d5E3CCC4c",
-  AgentFactory: process.env.NEXT_PUBLIC_AGENT_FACTORY_ADDRESS || "0x512F94E0a875516da53e2e59aC1995d6B2fbF781",
+  EasyV: process.env.NEXT_PUBLIC_EASYV_ADDRESS || "0x7E287bb62F87916c190b45BA0921F862Fb4b9Aa5",
+  AgentFactory: process.env.NEXT_PUBLIC_AGENT_FACTORY_ADDRESS || "0x72CC5BA2958CB688B00dFE2E578Db3BbB79eD311",
+  BondingContract: process.env.NEXT_PUBLIC_BONDING_ADDRESS || "0xC2D5F1C13e2603624a717409356DD48253f17319",
 } as const;
 
-// Import TypeChain generated types
+// Import TypeChain generated types - only import what exists
 export type {
   EasyV,
   AgentFactory,
-  BondingCurve,
-  AgentTokenExternal,
-  AgentTokenInternal,
 } from "../../../typechain-types";
 
 // Import contract ABIs from local copies
 import EasyVArtifact from "./abis/EasyV.json";
 import AgentFactoryArtifact from "./abis/AgentFactory.json";
+import BondingArtifact from "./abis/Bonding.json";
+import FERC20Artifact from "./abis/FERC20.json";
 import BondingCurveArtifact from "./abis/BondingCurve.json";
 import AgentTokenExternalArtifact from "./abis/AgentTokenExternal.json";
 import AgentTokenInternalArtifact from "./abis/AgentTokenInternal.json";
@@ -36,6 +36,8 @@ import IUniswapV2FactoryArtifact from "./abis/IUniswapV2Factory.json";
 export const ABIS = {
   EasyV: EasyVArtifact.abi,
   AgentFactory: AgentFactoryArtifact.abi,
+  Bonding: BondingArtifact.abi,
+  FERC20: FERC20Artifact.abi,
   BondingCurve: BondingCurveArtifact.abi,
   AgentTokenExternal: AgentTokenExternalArtifact.abi,
   AgentTokenInternal: AgentTokenInternalArtifact.abi,

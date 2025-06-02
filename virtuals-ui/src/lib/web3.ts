@@ -181,6 +181,21 @@ export class Web3Service {
     return createLoggingContract(contract, 'AgentFactory', CONTRACTS.AGENT_FACTORY);
   }
 
+  getBondingContract() {
+    console.log('🎯 Web3Service.getBondingContract() called');
+    console.log(`🎯 Bonding address: ${CONTRACTS.BONDING_CONTRACT}`);
+    console.log(`🎯 Bonding ABI available:`, !!ABIS.Bonding);
+    const contract = new ethers.Contract(CONTRACTS.BONDING_CONTRACT, ABIS.Bonding, this.signer!);
+    return createLoggingContract(contract, 'Bonding', CONTRACTS.BONDING_CONTRACT);
+  }
+
+  getFERC20Contract(address: string) {
+    console.log(`🪙 Web3Service.getFERC20Contract() called with address: ${address}`);
+    console.log(`🪙 FERC20 ABI available:`, !!ABIS.FERC20);
+    const contract = new ethers.Contract(address, ABIS.FERC20, this.signer!);
+    return createLoggingContract(contract, 'FERC20', address);
+  }
+
   getBondingCurveContract(address: string) {
     console.log(`📈 Web3Service.getBondingCurveContract() called with address: ${address}`);
     console.log(`📈 BondingCurve ABI available:`, !!ABIS.BondingCurve);

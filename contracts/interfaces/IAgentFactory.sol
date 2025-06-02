@@ -18,4 +18,24 @@ interface IAgentFactory {
     function withdraw(uint256 id) external;
 
     function totalAgents() external view returns (uint256);
+
+    function initFromBondingCurve(
+        string memory name,
+        string memory symbol,
+        uint8[] memory cores,
+        bytes32 tbaSalt,
+        address tbaImplementation,
+        uint32 daoVotingPeriod,
+        uint256 daoThreshold,
+        uint256 applicationThreshold_,
+        address creator
+    ) external returns (uint256);
+
+    function executeBondingCurveApplicationSalt(
+        uint256 id,
+        uint256 totalSupply,
+        uint256 lpSupply,
+        address vault,
+        bytes32 salt
+    ) external returns (address);
 }

@@ -10,34 +10,31 @@ import { Separator } from '@/components/ui/separator';
 import { web3Service } from '@/lib/web3';
 import Link from 'next/link';
 
-interface Agent {
+interface Token {
   address: string;
   name: string;
   symbol: string;
   creator: string;
-  virtualRaised: string;
-  graduated: boolean;
-  tokensSold: string;
-  graduationThreshold?: string;
-  externalTokenAddress?: string;
-  uniswapPairAddress?: string;
-  internalTokenBalance: string;
+  trading: boolean;
+  tradingOnUniswap: boolean;
+  description: string;
+  image: string;
+  userBalance: string;
 }
 
 export default function Home() {
   const [isConnected, setIsConnected] = useState(false);
   const [address, setAddress] = useState('');
-  const [easyVBalance, setEasyVBalance] = useState('0');
-  const [agents, setAgents] = useState<Agent[]>([]);
+  const [virtualBalance, setVirtualBalance] = useState('0');
+  const [tokens, setTokens] = useState<Token[]>([]);
   const [loading, setLoading] = useState(false);
   const [networkStatus, setNetworkStatus] = useState<{ chainId: number; name: string; isCorrect: boolean } | null>(null);
   
-  // Create agent form
-  const [agentName, setAgentName] = useState('');
-  const [agentSymbol, setAgentSymbol] = useState('');
+  // Create token form
+  const [tokenName, setTokenName] = useState('');
+  const [tokenSymbol, setTokenSymbol] = useState('');
   const [deposit, setDeposit] = useState('6000');
   const [buyAmount, setBuyAmount] = useState('');
-  const [redeemAmount, setRedeemAmount] = useState('');
 
   const checkConnection = useCallback(async () => {
     try {
@@ -85,21 +82,20 @@ export default function Home() {
         return; // Don't try to load contract data on wrong network
       }
       
-      // Load EasyV balance
-      const easyVContract = web3Service.getEasyVContract();
-      const balance = await easyVContract.balanceOf(currentAddress);
-      setEasyVBalance(web3Service.formatEther(balance));
+      // Load VIRTUAL balance
+      const virtualContract = web3Service.getEasyVContract();
+      const balance = await virtualContract.balanceOf(currentAddress);
+      setVirtualBalance(web3Service.formatEther(balance));
 
-      // Load agents
-      await loadAgents();
+      // Load tokens
+      await loadTokens();
     } catch (error) {
       console.error('Failed to load data:', error);
     }
   };
 
-  const loadAgents = async () => {
+  const loadTokens = async () => {
     try {
-      // Get the current address directly from web3Service to avoid race conditions
       const currentAddress = await web3Service.getAddress();
       if (!currentAddress) {
         console.warn('No wallet address available, skipping balance checks');
@@ -107,515 +103,392 @@ export default function Home() {
       }
       
       const factoryContract = web3Service.getAgentFactoryContract();
-      const agentAddresses = await factoryContract.allAgents();
+      const bondingContract = web3Service.getBondingContract();
       
-      const agentData: Agent[] = [];
-      for (const agentAddress of agentAddresses) {
+      // Get all created tokens from the factory
+      const tokenAddresses = await factoryContract.allBondingCurves();
+      
+      const tokenData: Token[] = [];
+      for (const tokenAddress of tokenAddresses) {
         try {
-          const bondingCurve = web3Service.getBondingCurveContract(agentAddress);
-          const [virtualRaised, graduated, tokensSold, creator, graduationThreshold] = await Promise.all([
-            bondingCurve.virtualRaised(),
-            bondingCurve.graduated(),
-            bondingCurve.tokensSold(),
-            bondingCurve.creator(),
-            bondingCurve.GRADUATION_THRESHOLD(),
-          ]);
-
-          // Get token info
-          const iTokenAddress = await bondingCurve.iToken();
-          const iToken = web3Service.getAgentTokenContract(iTokenAddress);
-          const [name, symbol] = await Promise.all([
-            iToken.name(),
-            iToken.symbol(),
-          ]);
-
-          // Get external token info if graduated
-          let externalTokenAddress: string | undefined;
-          let uniswapPairAddress: string | undefined;
-          let internalTokenBalance: string = '0';
+          // Get token info from bonding contract
+          const tokenInfo = await bondingContract.tokenInfo(tokenAddress);
           
-          if (graduated) {
-            try {
-              externalTokenAddress = await bondingCurve.eToken();
-              uniswapPairAddress = await bondingCurve.uniswapPair();
-              
-              // Get user's internal token balance for graduated agents using current address
-              const iTokenAddress = await bondingCurve.iToken();
-              const iToken = web3Service.getAgentTokenInternalContract(iTokenAddress);
-              const balance = await iToken.balanceOf(currentAddress);
-              internalTokenBalance = web3Service.formatEther(balance);
-            } catch (error) {
-              console.error(`Failed to get external token info for ${agentAddress}:`, error);
-            }
-          }
+          // Get the FERC20 token contract
+          const tokenContract = web3Service.getFERC20Contract(tokenAddress);
+          const [name, symbol] = await Promise.all([
+            tokenContract.name(),
+            tokenContract.symbol(),
+          ]);
 
-          agentData.push({
-            address: agentAddress,
+          // Get user's token balance
+          const userBalance = await tokenContract.balanceOf(currentAddress);
+
+          tokenData.push({
+            address: tokenAddress,
             name: name.replace('fun ', ''), // Remove "fun " prefix
-            symbol: symbol.replace('f', ''), // Remove "f" prefix
-            creator,
-            virtualRaised: web3Service.formatEther(virtualRaised),
-            graduated,
-            tokensSold: web3Service.formatEther(tokensSold),
-            graduationThreshold: web3Service.formatEther(graduationThreshold),
-            externalTokenAddress,
-            uniswapPairAddress,
-            internalTokenBalance,
+            symbol: symbol,
+            creator: tokenInfo.creator,
+            trading: tokenInfo.trading,
+            tradingOnUniswap: tokenInfo.tradingOnUniswap,
+            description: tokenInfo.description,
+            image: tokenInfo.image,
+            userBalance: web3Service.formatEther(userBalance),
           });
         } catch (error) {
-          console.error(`Failed to load agent ${agentAddress}:`, error);
+          console.error(`Failed to load token ${tokenAddress}:`, error);
         }
       }
       
-      setAgents(agentData);
+      setTokens(tokenData);
     } catch (error) {
-      console.error('Failed to load agents:', error);
+      console.error('Failed to load tokens:', error);
     }
   };
 
-  const createAgent = async () => {
-    if (!agentName || !agentSymbol) {
-      alert('Please enter agent name and symbol');
+  const createToken = async () => {
+    if (!tokenName || !tokenSymbol) {
+      alert('Please enter token name and symbol');
       return;
     }
 
     try {
       setLoading(true);
       
-      // Get the current address directly from web3Service to avoid race conditions
       const currentAddress = await web3Service.getAddress();
       if (!currentAddress) {
         alert('Wallet not connected');
         return;
       }
       
-      const easyVContract = web3Service.getEasyVContract();
+      const virtualContract = web3Service.getEasyVContract();
       const factoryContract = web3Service.getAgentFactoryContract();
       const depositAmount = web3Service.parseEther(deposit);
 
       // Check balance
-      const balance = await easyVContract.balanceOf(currentAddress);
+      const balance = await virtualContract.balanceOf(currentAddress);
       if (balance < depositAmount) {
-        alert('Insufficient EasyV balance');
+        alert('Insufficient VIRTUAL balance');
         return;
       }
 
-      // Approve spending
-      const approveTx = await easyVContract.approve(factoryContract.target, depositAmount);
+      // Approve factory to spend VIRTUAL
+      console.log('Approving VIRTUAL spend...');
+      const approveTx = await virtualContract.approve(factoryContract.target, depositAmount);
       await approveTx.wait();
 
-      // Create agent
-      const createTx = await factoryContract.createAgent(agentName, agentSymbol, depositAmount);
-      await createTx.wait();
+      // Launch token
+      console.log('Launching token...');
+      const launchTx = await factoryContract.launch(tokenName, tokenSymbol, depositAmount);
+      await launchTx.wait();
 
-      // Reset form
-      setAgentName('');
-      setAgentSymbol('');
-      setDeposit('6000');
-
-      // Reload data
-      await loadData();
+      alert('Token launched successfully!');
       
-      alert('Agent created successfully!');
+      // Clear form and reload data
+      setTokenName('');
+      setTokenSymbol('');
+      setDeposit('6000');
+      await loadData();
     } catch (error) {
-      console.error('Failed to create agent:', error);
-      alert('Failed to create agent. Check console for details.');
+      console.error('Failed to create token:', error);
+      alert('Failed to create token: ' + (error instanceof Error ? error.message : 'Unknown error'));
     } finally {
       setLoading(false);
     }
   };
 
-  const buyTokens = async (agentAddress: string, amount: string) => {
+  const buyTokens = async (tokenAddress: string, amount: string) => {
+    if (!amount || parseFloat(amount) <= 0) {
+      alert('Please enter a valid amount');
+      return;
+    }
+
     try {
       setLoading(true);
       
-      // Get the current address directly from web3Service to avoid race conditions
       const currentAddress = await web3Service.getAddress();
       if (!currentAddress) {
         alert('Wallet not connected');
         return;
       }
       
-      const easyVContract = web3Service.getEasyVContract();
-      const bondingCurve = web3Service.getBondingCurveContract(agentAddress);
+      const virtualContract = web3Service.getEasyVContract();
+      const bondingContract = web3Service.getBondingContract();
       const buyAmount = web3Service.parseEther(amount);
 
-      // Approve spending
-      const approveTx = await easyVContract.approve(bondingCurve.target, buyAmount);
+      // Check balance
+      const balance = await virtualContract.balanceOf(currentAddress);
+      if (balance < buyAmount) {
+        alert('Insufficient VIRTUAL balance');
+        return;
+      }
+
+      // Approve bonding contract to spend VIRTUAL
+      console.log('Approving VIRTUAL spend...');
+      const approveTx = await virtualContract.approve(bondingContract.target, buyAmount);
       await approveTx.wait();
 
       // Buy tokens
-      const buyTx = await bondingCurve.buy(buyAmount, 0);
+      console.log('Buying tokens...');
+      const deadline = Math.floor(Date.now() / 1000) + 300; // 5 minutes
+      const buyTx = await bondingContract.buy(buyAmount, tokenAddress, 0, deadline);
       await buyTx.wait();
 
-      // Reload data
-      await loadData();
-      
       alert('Tokens purchased successfully!');
+      await loadData();
     } catch (error) {
       console.error('Failed to buy tokens:', error);
-      alert('Failed to buy tokens. Check console for details.');
+      alert('Failed to buy tokens: ' + (error instanceof Error ? error.message : 'Unknown error'));
     } finally {
       setLoading(false);
     }
   };
 
-  const redeemTokens = async (agentAddress: string, amount: string) => {
+  const sellTokens = async (tokenAddress: string, amount: string) => {
+    if (!amount || parseFloat(amount) <= 0) {
+      alert('Please enter a valid amount');
+      return;
+    }
+
     try {
       setLoading(true);
       
-      // Get the current address directly from web3Service to avoid race conditions
       const currentAddress = await web3Service.getAddress();
       if (!currentAddress) {
         alert('Wallet not connected');
         return;
       }
       
-      const bondingCurve = web3Service.getBondingCurveContract(agentAddress);
-      
-      // Check if agent is graduated
-      const graduated = await bondingCurve.graduated();
-      if (!graduated) {
-        alert('This agent has not graduated yet. Redemption is only available for graduated agents.');
-        return;
-      }
-      
-      const iTokenAddress = await bondingCurve.iToken();
-      const iToken = web3Service.getAgentTokenInternalContract(iTokenAddress);
-      const redeemAmount = web3Service.parseEther(amount);
+      const bondingContract = web3Service.getBondingContract();
+      const tokenContract = web3Service.getFERC20Contract(tokenAddress);
+      const sellAmount = web3Service.parseEther(amount);
 
-      // Check user's internal token balance
-      const userBalance = await iToken.balanceOf(currentAddress);
-      if (userBalance < redeemAmount) {
-        alert(`Insufficient internal token balance. You have ${web3Service.formatEther(userBalance)} tokens but trying to redeem ${amount}.`);
+      // Check token balance
+      const tokenBalance = await tokenContract.balanceOf(currentAddress);
+      if (tokenBalance < sellAmount) {
+        alert('Insufficient token balance');
         return;
       }
 
-      // Check current allowance
-      const currentAllowance = await iToken.allowance(currentAddress, bondingCurve.target);
-      if (currentAllowance < redeemAmount) {
-        console.log(`Current allowance: ${web3Service.formatEther(currentAllowance)}, needed: ${amount}`);
-        
-        // Approve bonding curve to burn internal tokens
-        const approveTx = await iToken.approve(bondingCurve.target, redeemAmount);
-        await approveTx.wait();
-        console.log('Approval transaction completed');
-      }
+      // Approve bonding contract to spend tokens
+      console.log('Approving token spend...');
+      const approveTx = await tokenContract.approve(bondingContract.target, sellAmount);
+      await approveTx.wait();
 
-      // Redeem tokens
-      const redeemTx = await bondingCurve.redeem(redeemAmount);
-      await redeemTx.wait();
+      // Sell tokens
+      console.log('Selling tokens...');
+      const deadline = Math.floor(Date.now() / 1000) + 300; // 5 minutes
+      const sellTx = await bondingContract.sell(sellAmount, tokenAddress, 0, deadline);
+      await sellTx.wait();
 
-      // Reload data
+      alert('Tokens sold successfully!');
       await loadData();
-      
-      alert('Tokens redeemed successfully!');
     } catch (error) {
-      console.error('Failed to redeem tokens:', error);
-      
-      // Provide more specific error messages
-      if (error instanceof Error) {
-        if (error.message.includes('ERC20InsufficientAllowance')) {
-          alert('Insufficient allowance. Please try again - the approval might not have been processed yet.');
-        } else if (error.message.includes('ERC20InsufficientBalance')) {
-          alert('Insufficient token balance for redemption.');
-        } else if (error.message.includes('!grad')) {
-          alert('This agent has not graduated yet. Redemption is only available for graduated agents.');
-        } else {
-          alert(`Failed to redeem tokens: ${error.message}`);
-        }
-      } else {
-        alert('Failed to redeem tokens. Check console for details.');
-      }
+      console.error('Failed to sell tokens:', error);
+      alert('Failed to sell tokens: ' + (error instanceof Error ? error.message : 'Unknown error'));
     } finally {
       setLoading(false);
     }
   };
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
-      <div className="container mx-auto px-4 py-8">
-        {/* Header */}
-        <div className="flex justify-between items-center mb-8">
-          <div>
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-            EasyV Protocol
-            </h1>
-            <p className="text-slate-600 dark:text-slate-400 mt-2">
-              Create and trade AI agents with bonding curves
-            </p>
-            <div className="flex gap-4 mt-3">
-              <Link href="/graduated" className="text-blue-600 hover:text-blue-800 text-sm font-medium">
-                🎓 View Graduated Agents →
-              </Link>
-            </div>
-          </div>
-          
-          {!isConnected ? (
-            <Button onClick={connectWallet} disabled={loading} size="lg">
+  if (!isConnected) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-50 to-indigo-100 flex items-center justify-center">
+        <Card className="w-full max-w-md">
+          <CardHeader className="text-center">
+            <CardTitle className="text-2xl font-bold">Virtuals Fun</CardTitle>
+            <CardDescription>
+              Launch and trade tokens on the fun system
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button onClick={connectWallet} className="w-full" disabled={loading}>
               {loading ? 'Connecting...' : 'Connect Wallet'}
             </Button>
-          ) : (
-            <div className="text-right">
-              <div className="text-sm text-slate-600 dark:text-slate-400">
-                {address.slice(0, 6)}...{address.slice(-4)}
-              </div>
-              <div className="text-lg font-semibold">
-                {parseFloat(easyVBalance).toFixed(2)} EasyV
-              </div>
-            </div>
-          )}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-purple-50 to-indigo-100">
+      <div className="container mx-auto px-4 py-8">
+        {/* Header */}
+        <div className="text-center mb-8">
+          <h1 className="text-4xl font-bold text-gray-900 mb-2">Virtuals Fun</h1>
+          <p className="text-lg text-gray-600">Launch and trade tokens on the fun system</p>
         </div>
 
-        {isConnected ? (
-          <>
-            {/* Network Warning */}
-            {networkStatus && !networkStatus.isCorrect && (
-              <Card className="mb-6 border-yellow-200 bg-yellow-50 dark:border-yellow-800 dark:bg-yellow-900/20">
-                <CardContent className="pt-6">
-                  <div className="flex items-center gap-2 text-yellow-800 dark:text-yellow-200">
-                    <span className="text-lg">⚠️</span>
-                    <div>
-                      <p className="font-semibold">Wrong Network Detected</p>
-                      <p className="text-sm">
-                        You&apos;re connected to {networkStatus.name} (Chain ID: {networkStatus.chainId}). 
-                        Please switch to Hardhat Local Network (Chain ID: 31337) to use this app.
-                      </p>
-                      <p className="text-xs mt-1">
-                        Add network manually: RPC URL: http://localhost:8545, Chain ID: 31337
-                      </p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
+        {/* Network Status */}
+        {networkStatus && (
+          <div className="mb-6 text-center">
+            <Badge variant={networkStatus.isCorrect ? "default" : "destructive"}>
+              {networkStatus.name} (Chain ID: {networkStatus.chainId})
+            </Badge>
+          </div>
+        )}
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              {/* Create Agent */}
-              <div className="lg:col-span-1">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Create New Agent</CardTitle>
-                    <CardDescription>
-                      Deploy a new AI agent with bonding curve
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div>
-                      <Label htmlFor="name">Agent Name</Label>
-                      <Input
-                        id="name"
-                        value={agentName}
-                        onChange={(e) => setAgentName(e.target.value)}
-                        placeholder="My AI Agent"
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="symbol">Symbol</Label>
-                      <Input
-                        id="symbol"
-                        value={agentSymbol}
-                        onChange={(e) => setAgentSymbol(e.target.value.toUpperCase())}
-                        placeholder="MYAI"
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="deposit">Initial Deposit (EasyV)</Label>
-                      <Input
-                        id="deposit"
-                        type="number"
-                        value={deposit}
-                        onChange={(e) => setDeposit(e.target.value)}
-                        min="6000"
-                      />
-                      <p className="text-xs text-slate-500 mt-1">
-                        Minimum: 6,000 EasyV
-                      </p>
-                    </div>
-                    <Button 
-                      onClick={createAgent} 
-                      disabled={loading || !agentName || !agentSymbol || (networkStatus?.isCorrect === false)}
-                      className="w-full"
-                    >
-                      {loading ? 'Creating...' : 'Create Agent'}
-                    </Button>
-                  </CardContent>
-                </Card>
+        {/* User Info */}
+        <Card className="mb-8">
+          <CardHeader>
+            <CardTitle>Wallet Info</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <Label>Address</Label>
+                <p className="text-sm font-mono bg-gray-100 p-2 rounded">{address}</p>
               </div>
-
-              {/* Agents List */}
-              <div className="lg:col-span-2">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Active Agents</CardTitle>
-                    <CardDescription>
-                      Browse and interact with deployed agents
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    {agents.length === 0 ? (
-                      <div className="text-center py-8 text-slate-500">
-                        No agents created yet. Create the first one!
-                      </div>
-                    ) : (
-                      <div className="space-y-4">
-                        {agents.map((agent, index) => (
-                          <div key={agent.address} className="border rounded-lg p-4">
-                            <div className="flex justify-between items-start mb-3">
-                              <div>
-                                <h3 className="font-semibold text-lg">{agent.name}</h3>
-                                <p className="text-sm text-slate-600">{agent.symbol}</p>
-                              </div>
-                              <Badge variant={agent.graduated ? "default" : "secondary"}>
-                                {agent.graduated ? "Graduated" : "Bonding"}
-                              </Badge>
-                            </div>
-                            
-                            <div className="grid grid-cols-2 gap-4 text-sm mb-3">
-                              <div>
-                                <span className="text-slate-600">Virtual Raised:</span>
-                                <div className="font-medium">{parseFloat(agent.virtualRaised).toFixed(2)} EasyV</div>
-                              </div>
-                              <div>
-                                <span className="text-slate-600">Tokens Sold:</span>
-                                <div className="font-medium">{parseFloat(agent.tokensSold).toFixed(8)}</div>
-                              </div>
-                            </div>
-
-                            {!agent.graduated && agent.graduationThreshold && (
-                              <div className="mb-3">
-                                <div className="flex justify-between text-sm mb-1">
-                                  <span className="text-slate-600">Graduation Progress:</span>
-                                  <span className="text-slate-600">
-                                    {((parseFloat(agent.virtualRaised) / parseFloat(agent.graduationThreshold)) * 100).toFixed(1)}%
-                                  </span>
-                                </div>
-                                <div className="w-full bg-slate-200 rounded-full h-2">
-                                  <div 
-                                    className="bg-blue-600 h-2 rounded-full transition-all duration-300" 
-                                    style={{ 
-                                      width: `${Math.min(100, (parseFloat(agent.virtualRaised) / parseFloat(agent.graduationThreshold)) * 100)}%` 
-                                    }}
-                                  ></div>
-                                </div>
-                                <p className="text-xs text-slate-500 mt-1">
-                                  Need {(parseFloat(agent.graduationThreshold) - parseFloat(agent.virtualRaised)).toFixed(2)} more EasyV to graduate
-                                </p>
-                              </div>
-                            )}
-
-                            {agent.graduated && agent.externalTokenAddress && (
-                              <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
-                                <h4 className="font-semibold text-green-800 mb-2">🎓 Graduated Agent</h4>
-                                <div className="space-y-2 text-sm">
-                                  <div>
-                                    <span className="font-medium">External Token:</span>{' '}
-                                    <span className="font-mono text-xs">{agent.externalTokenAddress}</span>
-                                  </div>
-                                  <div>
-                                    <span className="font-medium">Uniswap Pair:</span>{' '}
-                                    <span className="font-mono text-xs">{agent.uniswapPairAddress}</span>
-                                  </div>
-                                  <div>
-                                    <span className="font-medium">Your Internal Tokens:</span>{' '}
-                                    <span className="font-semibold">{agent.internalTokenBalance} tokens</span>
-                                  </div>
-                                  
-                                  {parseFloat(agent.internalTokenBalance) > 0 && (
-                                    <div className="mt-3">
-                                      <div className="flex gap-2">
-                                        <input
-                                          type="number"
-                                          placeholder="Amount to redeem"
-                                          className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm"
-                                          value={redeemAmount}
-                                          onChange={(e) => setRedeemAmount(e.target.value)}
-                                          max={agent.internalTokenBalance}
-                                        />
-                                        <Button
-                                          onClick={() => redeemTokens(agent.address, redeemAmount)}
-                                          disabled={loading || !redeemAmount || parseFloat(redeemAmount) <= 0}
-                                          className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 text-sm"
-                                        >
-                                          Redeem
-                                        </Button>
-                                      </div>
-                                      <p className="text-xs text-gray-600 mt-1">
-                                        Redeem internal tokens for external tokens (1:1 ratio)
-                                      </p>
-                                    </div>
-                                  )}
-                                  
-                                  {parseFloat(agent.internalTokenBalance) === 0 && (
-                                    <p className="text-sm text-gray-600 mt-2">
-                                      You don't have any internal tokens to redeem for this agent.
-                                    </p>
-                                  )}
-                                  
-                                  <div className="mt-3 pt-3 border-t border-green-200">
-                                    <Link 
-                                      href="/graduated" 
-                                      className="text-green-600 hover:text-green-800 text-sm font-medium"
-                                    >
-                                      Trade on Uniswap →
-                                    </Link>
-                                  </div>
-                                </div>
-                              </div>
-                            )}
-                            
-                            <Separator className="my-3" />
-                            
-                            <div className="flex gap-2">
-                              <Input
-                                placeholder="Amount (EasyV)"
-                                className="flex-1"
-                                id={`buy-${index}`}
-                              />
-                              <Button
-                                onClick={() => {
-                                  const input = document.getElementById(`buy-${index}`) as HTMLInputElement;
-                                  if (input.value) {
-                                    buyTokens(agent.address, input.value);
-                                  }
-                                }}
-                                disabled={loading || agent.graduated || (networkStatus?.isCorrect === false)}
-                                size="sm"
-                              >
-                                Buy Tokens
-                              </Button>
-                            </div>
-                            
-                            <p className="text-xs text-slate-500 mt-2">
-                              Creator: {agent.creator.slice(0, 6)}...{agent.creator.slice(-4)}
-                            </p>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
+              <div>
+                <Label>VIRTUAL Balance</Label>
+                <p className="text-lg font-bold">{virtualBalance} VIRTUAL</p>
               </div>
             </div>
-          </>
-        ) : (
-          <Card className="max-w-md mx-auto">
-            <CardHeader className="text-center">
-              <CardTitle>Welcome to Virtuals Protocol</CardTitle>
-              <CardDescription>
-                Connect your wallet to start creating and trading AI agents
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="text-center">
-              <Button onClick={connectWallet} disabled={loading} size="lg">
-                {loading ? 'Connecting...' : 'Connect Wallet'}
-              </Button>
-              <p className="text-xs text-slate-500 mt-4">
-                Make sure you&apos;re connected to the Hardhat local network
-              </p>
-            </CardContent>
-          </Card>
-        )}
+          </CardContent>
+        </Card>
+
+        {/* Create Token */}
+        <Card className="mb-8">
+          <CardHeader>
+            <CardTitle>Launch New Token</CardTitle>
+            <CardDescription>
+              Create a new token on the fun system (Minimum: 6,000 VIRTUAL)
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+              <div>
+                <Label htmlFor="tokenName">Token Name</Label>
+                <Input
+                  id="tokenName"
+                  value={tokenName}
+                  onChange={(e) => setTokenName(e.target.value)}
+                  placeholder="My Token"
+                />
+              </div>
+              <div>
+                <Label htmlFor="tokenSymbol">Symbol</Label>
+                <Input
+                  id="tokenSymbol"
+                  value={tokenSymbol}
+                  onChange={(e) => setTokenSymbol(e.target.value)}
+                  placeholder="MTK"
+                />
+              </div>
+              <div>
+                <Label htmlFor="deposit">Initial Purchase (VIRTUAL)</Label>
+                <Input
+                  id="deposit"
+                  type="number"
+                  value={deposit}
+                  onChange={(e) => setDeposit(e.target.value)}
+                  placeholder="6000"
+                  min="6000"
+                />
+              </div>
+            </div>
+            <Button onClick={createToken} disabled={loading || !tokenName || !tokenSymbol}>
+              {loading ? 'Creating...' : 'Launch Token'}
+            </Button>
+          </CardContent>
+        </Card>
+
+        {/* Tokens List */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Available Tokens</CardTitle>
+            <CardDescription>
+              Buy and sell tokens on the bonding curve
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {tokens.length === 0 ? (
+              <p className="text-center text-gray-500 py-8">No tokens available</p>
+            ) : (
+              <div className="space-y-4">
+                {tokens.map((token) => (
+                  <div key={token.address} className="border rounded-lg p-4">
+                    <div className="flex justify-between items-start mb-4">
+                      <div>
+                        <h3 className="text-xl font-bold">{token.name} ({token.symbol})</h3>
+                        <p className="text-sm text-gray-600 font-mono">{token.address}</p>
+                        <p className="text-sm text-gray-600">Creator: {token.creator}</p>
+                        {token.description && (
+                          <p className="text-sm text-gray-600 mt-1">{token.description}</p>
+                        )}
+                      </div>
+                      <div className="flex gap-2">
+                        <Badge variant={token.trading ? "default" : "secondary"}>
+                          {token.trading ? "Trading" : "Not Trading"}
+                        </Badge>
+                        {token.tradingOnUniswap && (
+                          <Badge variant="outline">Graduated</Badge>
+                        )}
+                      </div>
+                    </div>
+                    
+                    <div className="mb-4">
+                      <Label>Your Balance: {token.userBalance} {token.symbol}</Label>
+                    </div>
+
+                    {token.trading && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label>Buy Tokens (VIRTUAL)</Label>
+                          <div className="flex gap-2">
+                            <Input
+                              type="number"
+                              placeholder="Amount"
+                              value={buyAmount}
+                              onChange={(e) => setBuyAmount(e.target.value)}
+                            />
+                            <Button 
+                              onClick={() => buyTokens(token.address, buyAmount)}
+                              disabled={loading || !buyAmount}
+                            >
+                              Buy
+                            </Button>
+                          </div>
+                        </div>
+                        
+                        <div className="space-y-2">
+                          <Label>Sell Tokens</Label>
+                          <div className="flex gap-2">
+                            <Input
+                              type="number"
+                              placeholder="Amount"
+                              value={buyAmount}
+                              onChange={(e) => setBuyAmount(e.target.value)}
+                            />
+                            <Button 
+                              onClick={() => sellTokens(token.address, buyAmount)}
+                              disabled={loading || !buyAmount}
+                              variant="outline"
+                            >
+                              Sell
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {token.tradingOnUniswap && (
+                      <div className="mt-4 p-3 bg-green-50 rounded">
+                        <p className="text-sm text-green-700">
+                          🎉 This token has graduated and is now trading on Uniswap!
+                        </p>
+                        <Link href="/graduated" className="text-sm text-blue-600 hover:underline">
+                          View graduated tokens →
+                        </Link>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

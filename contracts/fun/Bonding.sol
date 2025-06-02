@@ -12,7 +12,7 @@ import "./FFactory.sol";
 import "./IFPair.sol";
 import "./FRouter.sol";
 import "./FERC20.sol";
-import "../interfaces/IAgentFactoryV3.sol";
+import "../interfaces/IAgentFactory.sol";
 
 contract Bonding is
     Initializable,
@@ -187,7 +187,7 @@ contract Bonding is
 
         FERC20 token = new FERC20{
             salt: keccak256(abi.encodePacked(msg.sender, block.timestamp))
-        }(string.concat("fun ", _name), _ticker, initialSupply, maxTx);
+        }(string.concat("fun ", _name), _ticker, initialSupply / 1 ether, maxTx);
         uint256 supply = token.totalSupply();
 
         address _pair = factory.createPair(address(token), assetToken);
@@ -381,7 +381,7 @@ contract Bonding is
         router.graduate(tokenAddress);
 
         IERC20(router.assetToken()).forceApprove(agentFactory, assetBalance);
-        uint256 id = IAgentFactoryV3(agentFactory).initFromBondingCurve(
+        uint256 id = IAgentFactory(agentFactory).initFromBondingCurve(
             string.concat(_token.data._name, " by Virtuals"),
             _token.data.ticker,
             _token.cores,
@@ -393,7 +393,7 @@ contract Bonding is
             _token.creator
         );
 
-        address agentToken = IAgentFactoryV3(agentFactory)
+        address agentToken = IAgentFactory(agentFactory)
             .executeBondingCurveApplicationSalt(
                 id,
                 _token.data.supply / 1 ether,

@@ -6,6 +6,7 @@ import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol"
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
+
 import "./FFactory.sol";
 import "./IFPair.sol";
 
@@ -68,7 +69,7 @@ contract FRouter is
             uint256 newReserveA = k / newReserveB;
 
             amountOut = reserveA - newReserveA;
-        } else { // sell
+        } else {   // sell
             uint256 newReserveA = reserveA + amountIn;
 
             uint256 newReserveB = k / newReserveA;
@@ -117,7 +118,7 @@ contract FRouter is
 
         token.safeTransferFrom(to, pairAddress, amountIn);
 
-        uint fee = 1000;
+        uint fee = factory.sellTax();
         uint256 txFee = (fee * amountOut) / 100;
 
         uint256 amount = amountOut - txFee;
@@ -127,6 +128,7 @@ contract FRouter is
         pair.transferAsset(feeTo, txFee);
 
         pair.swap(amountIn, 0, 0, amountOut);
+
 
         return (amountIn, amountOut);
     }
@@ -142,7 +144,7 @@ contract FRouter is
 
         address pair = factory.getPair(tokenAddress, assetToken);
 
-        uint fee = 1000;
+        uint fee = factory.buyTax();
         uint256 txFee = (fee * amountIn) / 100;
         address feeTo = factory.taxVault();
 
@@ -157,6 +159,7 @@ contract FRouter is
         IFPair(pair).transferTo(to, amountOut);
 
         IFPair(pair).swap(0, amountOut, amount, 0);
+
 
         return (amount, amountOut);
     }
