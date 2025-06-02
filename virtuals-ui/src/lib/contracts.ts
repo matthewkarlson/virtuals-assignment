@@ -1,17 +1,17 @@
 // Contract addresses from deployment
 export const CONTRACTS = {
-  EASYV: "0x439c09706D52e577B036E67b63308C7f218d2b22",
-  AGENT_FACTORY: "0x2948dcd1B5537E3C0a596716b908AE23ab06CDa9",
-  BONDING_CONTRACT: "0x5c381F8Fb58622beD71119dEA591e7aeF5Bc52F0",
+  EASYV: "0x244dE6b06E7087110b94Cde88A42d9aBA17efa52",
+  AGENT_FACTORY: "0xa7E99C1df635d13d61F7c81eCe571cc952E64526",
+  BONDING_CONTRACT: "0x07b3419cA340DdB3D813C5e6eCeA5C1085EFC1f2",
   // Uniswap V2 Router (for local testing - this would be different on mainnet)
   UNISWAP_ROUTER: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
 } as const;
 
 // Contract addresses - these will be set after deployment
 export const CONTRACT_ADDRESSES = {
-  EasyV: process.env.NEXT_PUBLIC_EASYV_ADDRESS || "0x439c09706D52e577B036E67b63308C7f218d2b22",
-  AgentFactory: process.env.NEXT_PUBLIC_AGENT_FACTORY_ADDRESS || "0x2948dcd1B5537E3C0a596716b908AE23ab06CDa9",
-  BondingContract: process.env.NEXT_PUBLIC_BONDING_ADDRESS || "0x5c381F8Fb58622beD71119dEA591e7aeF5Bc52F0",
+  EasyV: process.env.NEXT_PUBLIC_EASYV_ADDRESS || "0x244dE6b06E7087110b94Cde88A42d9aBA17efa52",
+  AgentFactory: process.env.NEXT_PUBLIC_AGENT_FACTORY_ADDRESS || "0xa7E99C1df635d13d61F7c81eCe571cc952E64526",
+  BondingContract: process.env.NEXT_PUBLIC_BONDING_ADDRESS || "0x07b3419cA340DdB3D813C5e6eCeA5C1085EFC1f2",
 } as const;
 
 // Import TypeChain generated types - only import what exists
@@ -25,6 +25,9 @@ import EasyVArtifact from "./abis/EasyV.json";
 import AgentFactoryArtifact from "./abis/AgentFactory.json";
 import BondingArtifact from "./abis/Bonding.json";
 import FERC20Artifact from "./abis/FERC20.json";
+import FFactoryArtifact from "./abis/FFactory.json";
+import FPairArtifact from "./abis/FPair.json";
+import FRouterArtifact from "./abis/FRouter.json";
 import BondingCurveArtifact from "./abis/BondingCurve.json";
 import AgentTokenExternalArtifact from "./abis/AgentTokenExternal.json";
 import AgentTokenInternalArtifact from "./abis/AgentTokenInternal.json";
@@ -38,6 +41,9 @@ export const ABIS = {
   AgentFactory: AgentFactoryArtifact.abi,
   Bonding: BondingArtifact.abi,
   FERC20: FERC20Artifact.abi,
+  FFactory: FFactoryArtifact.abi,
+  FPair: FPairArtifact.abi,
+  FRouter: FRouterArtifact.abi,
   BondingCurve: BondingCurveArtifact.abi,
   AgentTokenExternal: AgentTokenExternalArtifact.abi,
   AgentTokenInternal: AgentTokenInternalArtifact.abi,

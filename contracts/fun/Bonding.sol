@@ -12,7 +12,7 @@ import "./FFactory.sol";
 import "./IFPair.sol";
 import "./FRouter.sol";
 import "./FERC20.sol";
-import "../interfaces/IAgentFactory.sol";
+import "../interfaces/IAgentFactoryV3.sol";
 
 contract Bonding is
     Initializable,
@@ -83,10 +83,11 @@ contract Bonding is
 
     mapping(address => Token) public tokenInfo;
     address[] public tokenInfos;
-
+    address[] public graduatedTokens;
+    
     event Launched(address indexed token, address indexed pair, uint);
     event Deployed(address indexed token, uint256 amount0, uint256 amount1);
-    event Graduated(address indexed token, address agentToken);
+    event Graduated(address indexed token);
 
     error InvalidTokenStatus();
     error InvalidInput();
@@ -187,7 +188,7 @@ contract Bonding is
 
         FERC20 token = new FERC20{
             salt: keccak256(abi.encodePacked(msg.sender, block.timestamp))
-        }(string.concat("fun ", _name), _ticker, initialSupply / 1 ether, maxTx);
+        }(string.concat("fun ", _name), _ticker, initialSupply, maxTx);
         uint256 supply = token.totalSupply();
 
         address _pair = factory.createPair(address(token), assetToken);
@@ -319,14 +320,12 @@ contract Bonding is
         (uint256 amount1In, uint256 amount0Out) = router.buy(
             amountIn,
             tokenAddress,
-            address(this)
+            buyer
         );
 
         if (amount0Out < amountOutMin) {
             revert SlippageTooHigh();
         }
-
-        FERC20(tokenAddress).transfer(buyer, amount0Out);
 
         uint256 newReserveA = reserveA - amount0Out;
         uint256 duration = block.timestamp -
@@ -352,14 +351,12 @@ contract Bonding is
             revert InvalidTokenStatus();
         }
 
-        // Transfer VIRTUAL tokens from user to this contract first
+        // Transfer VIRTUAL tokens from user to bonding contract, then approve router
         address assetToken = router.assetToken();
         IERC20(assetToken).safeTransferFrom(msg.sender, address(this), amountIn);
-        
-        // Approve router to spend the VIRTUAL tokens
         IERC20(assetToken).forceApprove(address(router), amountIn);
 
-        _buy(msg.sender, amountIn, tokenAddress, amountOutMin, deadline);
+        _buy(address(this), amountIn, tokenAddress, amountOutMin, deadline);
 
         return true;
     }
@@ -388,42 +385,12 @@ contract Bonding is
         uint256 tokenBalance = pair.balance();
 
         router.graduate(tokenAddress);
-
+        graduatedTokens.push(tokenAddress);
         IERC20(router.assetToken()).forceApprove(agentFactory, assetBalance);
-        uint256 id = IAgentFactory(agentFactory).initFromBondingCurve(
-            string.concat(_token.data._name, " by Virtuals"),
-            _token.data.ticker,
-            _token.cores,
-            _deployParams.tbaSalt,
-            _deployParams.tbaImplementation,
-            _deployParams.daoVotingPeriod,
-            _deployParams.daoThreshold,
-            assetBalance,
-            _token.creator
-        );
-
-        address agentToken = IAgentFactory(agentFactory)
-            .executeBondingCurveApplicationSalt(
-                id,
-                _token.data.supply / 1 ether,
-                tokenBalance / 1 ether,
-                pairAddress,
-                keccak256(
-                    abi.encodePacked(msg.sender, block.timestamp, tokenAddress)
-                )
-            );
-        _token.agentToken = agentToken;
-
-        router.approval(
-            pairAddress,
-            agentToken,
-            address(this),
-            IERC20(agentToken).balanceOf(pairAddress)
-        );
 
         token_.burnFrom(pairAddress, tokenBalance);
 
-        emit Graduated(tokenAddress, agentToken);
+        emit Graduated(tokenAddress);
     }
 
     function unwrapToken(

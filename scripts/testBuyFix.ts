@@ -1,11 +1,10 @@
 import { ethers } from "hardhat";
 
 async function main() {
-  console.log("🧪 Testing fixed buy functionality...");
+  console.log("🧪 Testing simplified Bonding-only approach...");
 
-  // Use the newest deployment addresses
+  // Use the newest deployment addresses (Bonding contract only)
   const EASYV_ADDRESS = "0x439c09706D52e577B036E67b63308C7f218d2b22";
-  const AGENT_FACTORY_ADDRESS = "0x2948dcd1B5537E3C0a596716b908AE23ab06CDa9";
   const BONDING_ADDRESS = "0x5c381F8Fb58622beD71119dEA591e7aeF5Bc52F0";
 
   const [deployer] = await ethers.getSigners();
@@ -20,78 +19,122 @@ async function main() {
 
   // Get contract instances
   const easyV = await ethers.getContractAt("EasyV", EASYV_ADDRESS);
-  const agentFactory = await ethers.getContractAt("AgentFactory", AGENT_FACTORY_ADDRESS);
   const bonding = await ethers.getContractAt("Bonding", BONDING_ADDRESS);
 
-  // Check balance
+  // Launch a token directly
+  const purchaseAmount = ethers.parseEther("6000");
+  
+  console.log("\n💰 Checking VIRTUAL balance...");
   const balance = await easyV.balanceOf(deployer.address);
-  console.log("EasyV balance:", ethers.formatEther(balance));
+  console.log("VIRTUAL balance:", ethers.formatEther(balance));
+  
+  if (balance < purchaseAmount) {
+    console.log("❌ Insufficient VIRTUAL balance");
+    return;
+  }
 
-  console.log("\n🚀 Step 1: Launching a token...");
-  try {
-    const launchAmount = ethers.parseEther("200");
-    await easyV.approve(AGENT_FACTORY_ADDRESS, launchAmount, gasSettings);
-    console.log("✅ Approved AgentFactory");
+  console.log("\n🎯 Launching token directly through Bonding...");
+  const approveTx = await easyV.approve(BONDING_ADDRESS, purchaseAmount, gasSettings);
+  await approveTx.wait();
 
-    const tx = await agentFactory.launch(
-      "TestBuy",
-      "TBUY",
-      launchAmount,
-      gasSettings
-    );
+  const launchTx = await bonding.launch(
+    "TestToken",
+    "TEST",
+    [1], // cores
+    "A test token", // description
+    "", // image
+    ["", "", "", ""], // urls
+    purchaseAmount,
+    gasSettings
+  );
+  const receipt = await launchTx.wait();
+
+  if (receipt) {
+    console.log("✅ Direct Bonding.launch() successful!");
+    console.log("Gas used:", receipt.gasUsed.toString());
+
+    // Test the FFactory approach to get tokens
+    console.log("\n📊 Testing FFactory token discovery...");
+    const factoryAddress = await bonding.factory();
+    const factory = await ethers.getContractAt("FFactory", factoryAddress);
     
-    const receipt = await tx.wait();
-    if (receipt) {
-      console.log("✅ Token launched successfully!");
-      console.log("Gas used:", receipt.gasUsed.toString());
+    const pairCount = await factory.allPairsLength();
+    console.log("Total pairs in factory:", pairCount.toString());
+    
+    if (pairCount > 0) {
+      const pairAddress = await factory.pairs(0);
+      console.log("First pair address:", pairAddress);
       
-      // Get the launched token address
-      const allTokens = await agentFactory.allBondingCurves();
-      const tokenAddress = allTokens[allTokens.length - 1]; // Get the latest token
-      console.log("Token address:", tokenAddress);
+      const pair = await ethers.getContractAt("FPair", pairAddress);
+      const tokenA = await pair.tokenA();
+      const tokenB = await pair.tokenB();
       
-      console.log("\n💰 Step 2: Testing buy functionality...");
+      console.log("Pair tokens:", tokenA, tokenB);
       
-      // Try to buy some tokens
-      const buyAmount = ethers.parseEther("100");
+      // Find which one is not VIRTUAL
+      const tokenAddress = tokenA.toLowerCase() === EASYV_ADDRESS.toLowerCase() ? tokenB : tokenA;
+      console.log("Launched token address:", tokenAddress);
       
-      // Approve Bonding contract to spend VIRTUAL
-      await easyV.approve(BONDING_ADDRESS, buyAmount, gasSettings);
-      console.log("✅ Approved Bonding contract for buy");
+      // Get token info
+      const tokenInfo = await bonding.tokenInfo(tokenAddress);
+      console.log("Token info trading status:", tokenInfo.trading);
+      console.log("Token info tradingOnUniswap:", tokenInfo.tradingOnUniswap);
       
-      // Buy tokens
-      const buyTx = await bonding.buy(
-        buyAmount,
-        tokenAddress, 
-        0, // minAmountOut
-        Math.floor(Date.now() / 1000) + 300, // deadline
-        gasSettings
-      );
+      // Test buying to trigger graduation
+      console.log("\n🚀 Testing graduation by buying large amount...");
+      const gradThreshold = await bonding.gradThreshold();
+      console.log("Graduation threshold:", ethers.formatEther(gradThreshold));
       
-      const buyReceipt = await buyTx.wait();
-      if (buyReceipt) {
-        console.log("✅ Token purchase successful!");
-        console.log("Gas used:", buyReceipt.gasUsed.toString());
+      // Get current reserves to see how much we need to buy
+      const reserves = await pair.getReserves();
+      const currentVirtualReserves = reserves[1]; // tokenB should be VIRTUAL
+      console.log("Current VIRTUAL reserves:", ethers.formatEther(currentVirtualReserves));
+      
+      // Calculate how much we need to buy to get reserves below threshold
+      const needToDrain = currentVirtualReserves - gradThreshold;
+      const buyAmount = needToDrain + ethers.parseEther("1000"); // Buy a bit more to ensure graduation
+      console.log("Need to drain:", ethers.formatEther(needToDrain), "VIRTUAL");
+      console.log("Will buy:", ethers.formatEther(buyAmount), "VIRTUAL");
+      
+      try {
+        await easyV.approve(BONDING_ADDRESS, buyAmount, gasSettings);
         
-        // Check token balance
-        const tokenContract = await ethers.getContractAt("FERC20", tokenAddress);
-        const tokenBalance = await tokenContract.balanceOf(deployer.address);
-        console.log("Token balance received:", ethers.formatEther(tokenBalance));
+        const buyTx = await bonding.buy(
+          buyAmount,
+          tokenAddress,
+          0, // min amount out
+          Math.floor(Date.now() / 1000) + 300, // deadline
+          gasSettings
+        );
+        
+        const buyReceipt = await buyTx.wait();
+        if (buyReceipt) {
+          console.log("✅ Large buy successful! Gas used:", buyReceipt.gasUsed.toString());
+          
+          // Check if token graduated
+          const updatedTokenInfo = await bonding.tokenInfo(tokenAddress);
+          console.log("After buy - trading:", updatedTokenInfo.trading);
+          console.log("After buy - tradingOnUniswap:", updatedTokenInfo.tradingOnUniswap);
+          
+          // Check final reserves
+          const finalReserves = await pair.getReserves();
+          console.log("Final VIRTUAL reserves:", ethers.formatEther(finalReserves[1]));
+          
+          if (!updatedTokenInfo.trading && updatedTokenInfo.tradingOnUniswap) {
+            console.log("🎉 TOKEN GRADUATED! Now trading on Uniswap!");
+          } else {
+            console.log("Token has not graduated yet, reserves might still be above threshold");
+          }
+        }
+        
+      } catch (error: any) {
+        console.log("Large buy failed:", error.message);
       }
-    }
-    
-  } catch (error: any) {
-    console.error("❌ Test failed:", error.message);
-    
-    if (error.message.includes("ERC20InsufficientAllowance")) {
-      console.log("🔍 Still getting allowance error - need to investigate further");
     }
   }
 }
 
-main()
-  .then(() => process.exit(0))
-  .catch((error) => {
-    console.error(error);
-    process.exit(1);
-  }); 
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+}); 

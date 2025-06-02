@@ -69,7 +69,7 @@ contract FRouter is
             uint256 newReserveA = k / newReserveB;
 
             amountOut = reserveA - newReserveA;
-        } else {   // sell
+        } else { // sell
             uint256 newReserveA = reserveA + amountIn;
 
             uint256 newReserveB = k / newReserveA;

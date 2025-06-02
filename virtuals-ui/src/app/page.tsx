@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { web3Service } from '@/lib/web3';
+import { ABIS } from '@/lib/contracts';
 import Link from 'next/link';
 
 interface Token {
@@ -27,6 +28,7 @@ export default function Home() {
   const [address, setAddress] = useState('');
   const [virtualBalance, setVirtualBalance] = useState('0');
   const [tokens, setTokens] = useState<Token[]>([]);
+  const [graduatedTokens, setGraduatedTokens] = useState<Token[]>([]);
   const [loading, setLoading] = useState(false);
   const [networkStatus, setNetworkStatus] = useState<{ chainId: number; name: string; isCorrect: boolean } | null>(null);
   
@@ -102,15 +104,32 @@ export default function Home() {
         return;
       }
       
-      const factoryContract = web3Service.getAgentFactoryContract();
       const bondingContract = web3Service.getBondingContract();
       
-      // Get all created tokens from the factory
-      const tokenAddresses = await factoryContract.allBondingCurves();
+      // Get factory contract to access pairs list
+      const factoryAddress = await bondingContract.factory();
+      const factoryContract = web3Service.getContract(factoryAddress, ABIS.FFactory);
       
-      const tokenData: Token[] = [];
-      for (const tokenAddress of tokenAddresses) {
+      // Get total number of pairs (each pair corresponds to a launched token)
+      const pairCount = await factoryContract.allPairsLength();
+      
+      const allTokenData: Token[] = [];
+      for (let i = 0; i < pairCount; i++) {
         try {
+          // Get the pair address
+          const pairAddress = await factoryContract.pairs(i);
+          
+          // Get the pair contract to find out what tokens it contains
+          const pairContract = web3Service.getContract(pairAddress, ABIS.FPair);
+          const [tokenA, tokenB] = await Promise.all([
+            pairContract.tokenA(),
+            pairContract.tokenB()
+          ]);
+          
+          // The VIRTUAL token (EasyV) is one of them, the other is our launched token
+          const virtualAddress = web3Service.getEasyVAddress();
+          const tokenAddress = tokenA.toLowerCase() === virtualAddress.toLowerCase() ? tokenB : tokenA;
+          
           // Get token info from bonding contract
           const tokenInfo = await bondingContract.tokenInfo(tokenAddress);
           
@@ -124,7 +143,7 @@ export default function Home() {
           // Get user's token balance
           const userBalance = await tokenContract.balanceOf(currentAddress);
 
-          tokenData.push({
+          allTokenData.push({
             address: tokenAddress,
             name: name.replace('fun ', ''), // Remove "fun " prefix
             symbol: symbol,
@@ -136,11 +155,18 @@ export default function Home() {
             userBalance: web3Service.formatEther(userBalance),
           });
         } catch (error) {
-          console.error(`Failed to load token ${tokenAddress}:`, error);
+          console.error(`Failed to load token from pair ${i}:`, error);
         }
       }
       
-      setTokens(tokenData);
+      // Filter tokens: only show tokens that are still trading on bonding curve
+      const activeTokens = allTokenData.filter(token => token.trading && !token.tradingOnUniswap);
+      const graduatedTokens = allTokenData.filter(token => token.tradingOnUniswap);
+      
+      console.log(`📊 Token Summary: ${activeTokens.length} active on bonding curve, ${graduatedTokens.length} graduated to Uniswap`);
+      
+      setTokens(activeTokens);
+      setGraduatedTokens(graduatedTokens);
     } catch (error) {
       console.error('Failed to load tokens:', error);
     }
@@ -162,7 +188,7 @@ export default function Home() {
       }
       
       const virtualContract = web3Service.getEasyVContract();
-      const factoryContract = web3Service.getAgentFactoryContract();
+      const bondingContract = web3Service.getBondingContract();
       const depositAmount = web3Service.parseEther(deposit);
 
       // Check balance
@@ -172,14 +198,22 @@ export default function Home() {
         return;
       }
 
-      // Approve factory to spend VIRTUAL
+      // Approve bonding contract to spend VIRTUAL
       console.log('Approving VIRTUAL spend...');
-      const approveTx = await virtualContract.approve(factoryContract.target, depositAmount);
+      const approveTx = await virtualContract.approve(bondingContract.target, depositAmount);
       await approveTx.wait();
 
-      // Launch token
+      // Launch token directly through bonding contract
       console.log('Launching token...');
-      const launchTx = await factoryContract.launch(tokenName, tokenSymbol, depositAmount);
+      const launchTx = await bondingContract.launch(
+        tokenName,
+        tokenSymbol,
+        [1], // Default cores array
+        '', // Description
+        '', // Image
+        ['', '', '', ''], // URLs array
+        depositAmount
+      );
       await launchTx.wait();
 
       alert('Token launched successfully!');
@@ -397,14 +431,14 @@ export default function Home() {
         {/* Tokens List */}
         <Card>
           <CardHeader>
-            <CardTitle>Available Tokens</CardTitle>
+            <CardTitle>Active Bonding Curve Tokens</CardTitle>
             <CardDescription>
-              Buy and sell tokens on the bonding curve
+              Buy and sell tokens on the bonding curve. Tokens graduate to Uniswap when they reach the threshold.
             </CardDescription>
           </CardHeader>
           <CardContent>
             {tokens.length === 0 ? (
-              <p className="text-center text-gray-500 py-8">No tokens available</p>
+              <p className="text-center text-gray-500 py-8">No active tokens on bonding curve</p>
             ) : (
               <div className="space-y-4">
                 {tokens.map((token) => (
@@ -422,9 +456,6 @@ export default function Home() {
                         <Badge variant={token.trading ? "default" : "secondary"}>
                           {token.trading ? "Trading" : "Not Trading"}
                         </Badge>
-                        {token.tradingOnUniswap && (
-                          <Badge variant="outline">Graduated</Badge>
-                        )}
                       </div>
                     </div>
                     
@@ -472,23 +503,45 @@ export default function Home() {
                         </div>
                       </div>
                     )}
-
-                    {token.tradingOnUniswap && (
-                      <div className="mt-4 p-3 bg-green-50 rounded">
-                        <p className="text-sm text-green-700">
-                          🎉 This token has graduated and is now trading on Uniswap!
-                        </p>
-                        <Link href="/graduated" className="text-sm text-blue-600 hover:underline">
-                          View graduated tokens →
-                        </Link>
-                      </div>
-                    )}
                   </div>
                 ))}
               </div>
             )}
           </CardContent>
         </Card>
+
+        {/* Graduated Tokens Summary */}
+        {graduatedTokens.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Graduated Tokens</CardTitle>
+              <CardDescription>
+                These tokens have graduated from the bonding curve and now trade on Uniswap
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                <p className="text-lg font-semibold">🎉 {graduatedTokens.length} token{graduatedTokens.length !== 1 ? 's' : ''} graduated to Uniswap!</p>
+                {graduatedTokens.map((token) => (
+                  <div key={token.address} className="flex justify-between items-center p-3 bg-green-50 rounded-lg">
+                    <div>
+                      <span className="font-bold">{token.name} ({token.symbol})</span>
+                      <span className="text-sm text-gray-600 ml-2">Balance: {token.userBalance}</span>
+                    </div>
+                    <Badge variant="outline" className="bg-green-100">
+                      Trading on Uniswap
+                    </Badge>
+                  </div>
+                ))}
+                <div className="mt-4">
+                  <Link href="/graduated" className="text-blue-600 hover:underline">
+                    View all graduated tokens →
+                  </Link>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </div>
   );

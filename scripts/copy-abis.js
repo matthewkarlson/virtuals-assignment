@@ -14,6 +14,15 @@ const contracts = [
   'AgentTokenInternal'
 ];
 
+// Fun contracts to copy (from fun directory)
+const funContracts = [
+  'Bonding',
+  'FFactory', 
+  'FPair',
+  'FERC20',
+  'FRouter'
+];
+
 // Interface contracts to copy (from interfaces directory)
 const interfaces = [
   'IUniswapV2Router02',
@@ -46,6 +55,29 @@ contracts.forEach(contractName => {
     console.log(`✓ Copied ABI for ${contractName}`);
   } else {
     console.warn(`⚠ Artifact not found for ${contractName} at ${artifactPath}`);
+  }
+});
+
+// Copy fun contract ABIs (from fun directory)
+funContracts.forEach(contractName => {
+  const artifactPath = path.join(artifactsDir, 'fun', `${contractName}.sol`, `${contractName}.json`);
+  const outputPath = path.join(outputDir, `${contractName}.json`);
+  
+  if (fs.existsSync(artifactPath)) {
+    const artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+    
+    // Extract just the ABI and contract name
+    const abiData = {
+      contractName: artifact.contractName,
+      abi: artifact.abi,
+      bytecode: artifact.bytecode,
+      deployedBytecode: artifact.deployedBytecode
+    };
+    
+    fs.writeFileSync(outputPath, JSON.stringify(abiData, null, 2));
+    console.log(`✓ Copied ABI for ${contractName}`);
+  } else {
+    console.warn(`⚠ Fun contract artifact not found for ${contractName} at ${artifactPath}`);
   }
 });
 

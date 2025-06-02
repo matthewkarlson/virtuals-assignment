@@ -66,10 +66,10 @@ async function main() {
   
   // Bonding initialization parameters (matching the working test exactly)
   const fee = 100000; // 100000 / 1000 = 100 ether fee (matches test)
-  const tokenInitialSupply = ethers.parseEther("1000000000"); // 1B tokens with proper 18 decimals
+  const tokenInitialSupply = "1000000000"; // 1B tokens with proper 18 decimals
   const assetRate = 10000; // 100% (matches test)
   const maxTx = 100; // Just 100 (matches test)
-  const gradThreshold = ethers.parseEther("42000"); // Much smaller threshold - 42k ether
+  const gradThreshold = ethers.parseEther("85000000"); // Much smaller threshold - 42k ether
   
   const bonding = await upgrades.deployProxy(Bonding, [
     fFactoryAddress,
