@@ -271,16 +271,6 @@ with hyperbola_col2:
     st.metric("Constant Product (k)", f"{k_value:.2e}")
     st.metric("Initial Point", f"({initial_supply/1_000_000:.0f}M, {initial_virtuals_liquidity:.0f})")
     st.metric("Graduation Point", f"({graduation_token_threshold/1_000_000:.0f}M, {grad_virtuals_at_graduation:.0f})")
-    
-    # Show how asset rate affects the curve
-    st.subheader("📊 Tokenomics")
-    
-    # Calculate k for different asset rates for comparison
-    if asset_rate != DEFAULT_ASSET_RATE:
-        default_liquidity = calculate_initial_liquidity(initial_supply, DEFAULT_ASSET_RATE)
-        default_k = initial_supply * default_liquidity
-        k_ratio = k_value / default_k
-        st.write(f"**vs Default k:** {k_ratio:.2f}x")
 
 # Trading Simulator Section
 st.subheader("🔄 Interactive Trading Simulator")
@@ -365,7 +355,7 @@ if st.session_state.auto_trading:
             if st.session_state.total_tokens_sold > 1000:
                 # Generate random sell amount
                 max_sellable = st.session_state.total_tokens_sold * 0.3
-                mean_tokens = min(5000, max_sellable * 0.5)
+                mean_tokens = min(1000000, max_sellable * 0.5)
                 std_tokens = mean_tokens * 0.4
                 min_tokens = 500
                 

@@ -11,6 +11,7 @@ const config: HardhatUserConfig = {
         enabled: true,
         runs: 200, // Lower runs = smaller contract size, higher runs = cheaper execution
       },
+      viaIR: true, // Enable intermediate representation to fix stack too deep errors
     },
   },
   networks: {

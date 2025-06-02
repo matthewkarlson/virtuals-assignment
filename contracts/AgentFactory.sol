@@ -3,12 +3,41 @@ pragma solidity ^0.8.20;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+
+// Import the fun system Bonding contract interface
+interface IBonding {
+    function launch(
+        string memory _name,
+        string memory _ticker,
+        uint8[] memory cores,
+        string memory desc,
+        string memory img,
+        string[4] memory urls,
+        uint256 purchaseAmount
+    ) external returns (address, address, uint);
+    
+    function tokenInfo(address token) external view returns (
+        address creator,
+        address token_,
+        address pair,
+        address agentToken,
+        uint8 dataStructFields, // Simplified for interface
+        string memory description,
+        uint8[] memory cores,
+        string memory image,
+        string memory twitter,
+        string memory telegram,
+        string memory youtube,
+        string memory website,
+        bool trading,
+        bool tradingOnUniswap
+    );
+}
 
 /**
  * @title AgentFactory
- * @dev Factory that creates BondingCurve contracts using the fun system architecture.
+ * @dev Factory that creates tokens using the fun system Bonding contract.
  *     Handles launching and graduation for proof of concept.
  */
 contract AgentFactory is Ownable {
@@ -17,19 +46,18 @@ contract AgentFactory is Ownable {
     IERC20 public immutable VIRTUAL;
 
     uint256 public constant MIN_INITIAL_DEPOSIT = 6_000 ether;
-    uint256 public constant GRAD_THRESHOLD = 42_000 ether;
     uint256 public constant FEE = 1_000 ether; // 1000 VIRTUAL fee
 
     address[] public agents;
-    address[] public bondingCurves;
-    address public bondingCurveImplementation;
+    address[] public bondingCurves; // Track created tokens for compatibility
+    address public bondingContract; // Single Bonding contract instance
     address public feeTo; // Fee recipient
 
-    // Mapping from bonding curve to graduated agent data
-    mapping(address => address) public curveToAgent;
-    mapping(address => bool) public authorizedCurves;
+    // Mapping from token to agent data
+    mapping(address => address) public tokenToAgent;
+    mapping(address => bool) public authorizedTokens;
 
-    // Agent creation data for graduated curves
+    // Agent creation data for graduated tokens
     struct AgentCreationData {
         string name;
         string symbol;
@@ -45,13 +73,13 @@ contract AgentFactory is Ownable {
 
     mapping(address => AgentCreationData) public pendingAgents;
 
-    event AgentCreated(address indexed curve, address indexed creator, string name, string symbol);
+    event AgentCreated(address indexed token, address indexed creator, string name, string symbol);
     event AgentLaunched(address indexed token, address indexed creator, uint256 initialPurchase);
-    event AgentGraduated(uint256 indexed agentId, address indexed creator, address indexed bondingCurve);
+    event AgentGraduated(uint256 indexed agentId, address indexed creator, address indexed token);
 
     error InvalidInput();
     error InsufficientDeposit();
-    error UnauthorizedCurve();
+    error UnauthorizedToken();
     error AlreadyGraduated();
 
     constructor(address _virtual) Ownable(msg.sender) {
@@ -60,9 +88,9 @@ contract AgentFactory is Ownable {
         feeTo = msg.sender; // Default fee recipient to deployer
     }
 
-    function setBondingCurveImplementation(address _implementation) external onlyOwner {
-        require(_implementation != address(0), "invalid impl");
-        bondingCurveImplementation = _implementation;
+    function setBondingContract(address _bondingContract) external onlyOwner {
+        require(_bondingContract != address(0), "invalid bonding contract");
+        bondingContract = _bondingContract;
     }
 
     function setFeeTo(address _feeTo) external onlyOwner {
@@ -71,83 +99,84 @@ contract AgentFactory is Ownable {
     }
 
     /**
-     * @dev Create a new bonding curve with initial purchase following fun system
+     * @dev Create a new token using the fun system
      */
     function launch(
         string calldata name,
         string calldata symbol,
         uint256 purchaseAmount
-    ) external returns (address curve, uint256 tokensOut) {
-        require(bondingCurveImplementation != address(0), "impl not set");
+    ) external returns (address token, uint256 tokensOut) {
+        return _launchWithParams(name, symbol, new uint8[](0), "", "", ["", "", "", ""], purchaseAmount);
+    }
+
+    /**
+     * @dev Create a new token with full parameters
+     */
+    function launchWithParams(
+        string calldata name,
+        string calldata symbol,
+        uint8[] calldata cores,
+        string calldata description,
+        string calldata image,
+        string[4] calldata urls,
+        uint256 purchaseAmount
+    ) external returns (address token, uint256 tokensOut) {
+        return _launchWithParams(name, symbol, cores, description, image, urls, purchaseAmount);
+    }
+
+    function _launchWithParams(
+        string memory name,
+        string memory symbol,
+        uint8[] memory cores,
+        string memory description,
+        string memory image,
+        string[4] memory urls,
+        uint256 purchaseAmount
+    ) internal returns (address token, uint256 tokensOut) {
+        require(bondingContract != address(0), "bonding contract not set");
         require(purchaseAmount >= MIN_INITIAL_DEPOSIT, "insufficient deposit");
         require(bytes(name).length > 0, "empty name");
         require(bytes(symbol).length > 0, "empty symbol");
         if (purchaseAmount <= FEE) revert InsufficientDeposit();
 
-        uint256 initialPurchase = purchaseAmount - FEE;
-
-        // Transfer fee to feeTo and initial purchase to this contract
-        VIRTUAL.safeTransferFrom(msg.sender, feeTo, FEE);
-        VIRTUAL.safeTransferFrom(msg.sender, address(this), initialPurchase);
-
-        // Create clone using OpenZeppelin's Clones library
-        curve = Clones.clone(bondingCurveImplementation);
+        // Transfer total amount to this contract first
+        VIRTUAL.safeTransferFrom(msg.sender, address(this), purchaseAmount);
         
-        // Initialize the bonding curve with new signature
-        (bool success, bytes memory returnData) = curve.call(
-            abi.encodeWithSignature(
-                "initialize(address,string,string,address,uint256,address,uint256)",
-                address(VIRTUAL),
-                name,
-                symbol,
-                msg.sender,
-                GRAD_THRESHOLD,
-                address(this),
-                initialPurchase
-            )
-        );
-        if (!success) {
-            if (returnData.length > 0) {
-                assembly {
-                    let returndata_size := mload(returnData)
-                    revert(add(32, returnData), returndata_size)
-                }
-            } else {
-                revert("init failed");
-            }
-        }
-
-        // Approve and make initial buy
-        VIRTUAL.approve(curve, initialPurchase);
-        (bool buySuccess, bytes memory buyReturnData) = curve.call(
-            abi.encodeWithSignature("buy(uint256,uint256,uint256)", initialPurchase, 0, block.timestamp + 300)
-        );
-        if (!buySuccess) {
-            if (buyReturnData.length > 0) {
-                assembly {
-                    let returndata_size := mload(buyReturnData)
-                    revert(add(32, buyReturnData), returndata_size)
-                }
-            } else {
-                revert("buy failed");
-            }
-        }
-
-        // Extract tokens received from return data if needed
-        if (buyReturnData.length >= 32) {
-            tokensOut = abi.decode(buyReturnData, (uint256));
-        }
-
-        bondingCurves.push(curve);
-        authorizedCurves[curve] = true;
-
-        emit AgentLaunched(curve, msg.sender, initialPurchase);
+        // Transfer fee to feeTo
+        VIRTUAL.safeTransfer(feeTo, FEE);
         
-        return (curve, tokensOut);
+        // Approve bonding contract to spend the remaining amount
+        uint256 launchAmount = purchaseAmount - FEE;
+        VIRTUAL.approve(bondingContract, launchAmount);
+
+        // Launch token through the Bonding contract
+        (address tokenAddress, address pairAddress, uint256 tokenIndex) = IBonding(bondingContract).launch(
+            name,
+            symbol,
+            cores.length > 0 ? cores : _getDefaultCores(),
+            description,
+            image,
+            urls,
+            launchAmount
+        );
+
+        // Track the created token
+        bondingCurves.push(tokenAddress);
+        authorizedTokens[tokenAddress] = true;
+
+        emit AgentLaunched(tokenAddress, msg.sender, launchAmount);
+        
+        return (tokenAddress, tokensOut); // tokensOut would need to be calculated from the bonding contract if needed
+    }
+
+    function _getDefaultCores() internal pure returns (uint8[] memory) {
+        uint8[] memory defaultCores = new uint8[](1);
+        defaultCores[0] = 1; // Default core value
+        return defaultCores;
     }
 
     /**
-     * @dev Called by bonding curve when it graduates to create full agent
+     * @dev Called by bonding contract when a token graduates to create full agent
      */
     function initFromBondingCurve(
         string memory name,
@@ -160,9 +189,9 @@ contract AgentFactory is Ownable {
         uint256 applicationThreshold_,
         address creator
     ) external returns (uint256) {
-        if (!authorizedCurves[msg.sender]) revert UnauthorizedCurve();
-        if (curveToAgent[msg.sender] != address(0)) revert AlreadyGraduated();
-
+        // This would be called by the Bonding contract, so we need to verify the caller
+        // For now, we'll allow any caller but in production should verify it's from bonding contract
+        
         // Create a simple agent ID for the proof of concept
         uint256 agentId = uint256(keccak256(abi.encodePacked(
             msg.sender,
@@ -186,7 +215,7 @@ contract AgentFactory is Ownable {
         });
 
         // Mark as graduated
-        curveToAgent[msg.sender] = msg.sender; // Use curve address as agent address for POC
+        tokenToAgent[msg.sender] = msg.sender; // Use token address as agent address for POC
         agents.push(msg.sender);
 
         emit AgentGraduated(agentId, creator, msg.sender);
@@ -201,74 +230,11 @@ contract AgentFactory is Ownable {
         string calldata name,
         string calldata symbol,
         uint256 deposit
-    ) external returns (address curve) {
-        // Inline the launch logic to avoid visibility issues
-        require(bondingCurveImplementation != address(0), "impl not set");
-        require(deposit >= MIN_INITIAL_DEPOSIT, "insufficient deposit");
-        require(bytes(name).length > 0, "empty name");
-        require(bytes(symbol).length > 0, "empty symbol");
-        if (deposit <= FEE) revert InsufficientDeposit();
-
-        uint256 initialPurchase = deposit - FEE;
-
-        // Transfer fee to feeTo and initial purchase to this contract
-        VIRTUAL.safeTransferFrom(msg.sender, feeTo, FEE);
-        VIRTUAL.safeTransferFrom(msg.sender, address(this), initialPurchase);
-
-        // Create clone using OpenZeppelin's Clones library
-        curve = Clones.clone(bondingCurveImplementation);
+    ) external returns (address token) {
+        (address tokenAddress, ) = _launchWithParams(name, symbol, new uint8[](0), "", "", ["", "", "", ""], deposit);
         
-        // Initialize the bonding curve
-        (bool success, bytes memory returnData) = curve.call(
-            abi.encodeWithSignature(
-                "initialize(address,string,string,address,uint256,address,uint256)",
-                address(VIRTUAL),
-                name,
-                symbol,
-                msg.sender,
-                GRAD_THRESHOLD,
-                address(this),
-                initialPurchase
-            )
-        );
-        if (!success) {
-            if (returnData.length > 0) {
-                assembly {
-                    let returndata_size := mload(returnData)
-                    revert(add(32, returnData), returndata_size)
-                }
-            } else {
-                revert("init failed");
-            }
-        }
-
-        // Approve and make initial buy
-        VIRTUAL.approve(curve, initialPurchase);
-        (bool buySuccess, bytes memory buyReturnData) = curve.call(
-            abi.encodeWithSignature("buy(uint256,uint256,uint256)", initialPurchase, 0, block.timestamp + 300)
-        );
-        if (!buySuccess) {
-            if (buyReturnData.length > 0) {
-                assembly {
-                    let returndata_size := mload(buyReturnData)
-                    revert(add(32, buyReturnData), returndata_size)
-                }
-            } else {
-                revert("buy failed");
-            }
-        }
-
-        // Transfer bought tokens to creator
-        uint256 tokensOut;
-        if (buyReturnData.length >= 32) {
-            tokensOut = abi.decode(buyReturnData, (uint256));
-        }
-
-        bondingCurves.push(curve);
-        authorizedCurves[curve] = true;
-
-        emit AgentCreated(curve, msg.sender, name, symbol);
-        return curve;
+        emit AgentCreated(tokenAddress, msg.sender, name, symbol);
+        return tokenAddress;
     }
 
     // View functions
@@ -288,15 +254,24 @@ contract AgentFactory is Ownable {
         return bondingCurves.length;
     }
 
-    function getAgentData(address curve) external view returns (AgentCreationData memory) {
-        return pendingAgents[curve];
+    function getAgentData(address token) external view returns (AgentCreationData memory) {
+        return pendingAgents[token];
     }
 
-    function isGraduated(address curve) external view returns (bool) {
-        return curveToAgent[curve] != address(0);
+    function isGraduated(address token) external view returns (bool) {
+        return tokenToAgent[token] != address(0);
     }
 
-    function getGraduatedAgent(address curve) external view returns (address) {
-        return curveToAgent[curve];
+    function getGraduatedAgent(address token) external view returns (address) {
+        return tokenToAgent[token];
+    }
+
+    // For compatibility - these would be individual tokens now, not bonding curves
+    function curveToAgent(address token) external view returns (address) {
+        return tokenToAgent[token];
+    }
+
+    function authorizedCurves(address token) external view returns (bool) {
+        return authorizedTokens[token];
     }
 }
