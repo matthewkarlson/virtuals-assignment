@@ -19,11 +19,32 @@ interface IAgentFactory {
         uint256 applicationThreshold_,
         address creator
     ) external returns (uint256);
+
+    function executeBondingCurveApplicationSalt(
+        uint256 id,
+        uint256 totalSupply,
+        uint256 lpSupply,
+        address vault,
+        bytes32 salt
+    ) external returns (address);
+}
+
+// Interface for Bonding contract
+interface IBonding {
+    function launch(
+        string memory _name,
+        string memory _ticker,
+        uint8[] memory cores,
+        string memory desc,
+        string memory img,
+        string[4] memory urls,
+        uint256 purchaseAmount
+    ) external returns (address, address, uint);
 }
 
 /**
  * @title AgentFactory
- * @dev Minimal AgentFactory for POC - just handles the bonding curve integration
+ * @dev Minimal AgentFactory for POC - handles launch forwarding and bonding curve integration
  */
 contract AgentFactory is IAgentFactory, AccessControl {
     using SafeERC20 for IERC20;
@@ -33,6 +54,7 @@ contract AgentFactory is IAgentFactory, AccessControl {
     bytes32 public constant BONDING_ROLE = keccak256("BONDING_ROLE");
     
     uint256 private _nextId = 1;
+    address public bondingContract;
     
     struct Agent {
         string name;
@@ -46,6 +68,7 @@ contract AgentFactory is IAgentFactory, AccessControl {
     address[] public allAgents; // For compatibility
 
     event AgentCreated(uint256 indexed id, address indexed creator, string name, string symbol);
+    event AgentLaunched(address indexed token, address indexed creator, uint256 initialPurchase);
 
     constructor(address _virtual) {
         require(_virtual != address(0), "invalid virtual");
@@ -55,7 +78,78 @@ contract AgentFactory is IAgentFactory, AccessControl {
 
     function setBondingContract(address _bondingContract) external onlyRole(DEFAULT_ADMIN_ROLE) {
         require(_bondingContract != address(0), "invalid bonding contract");
+        bondingContract = _bondingContract;
         _grantRole(BONDING_ROLE, _bondingContract);
+    }
+
+    /**
+     * @dev Launch a token through the Bonding contract
+     */
+    function launch(
+        string calldata name,
+        string calldata symbol,
+        uint256 purchaseAmount
+    ) external returns (address token, uint256 tokensOut) {
+        return _launchWithParams(name, symbol, new uint8[](0), "", "", ["", "", "", ""], purchaseAmount);
+    }
+
+    /**
+     * @dev Launch a token with full parameters through the Bonding contract
+     */
+    function launchWithParams(
+        string calldata name,
+        string calldata symbol,
+        uint8[] calldata cores,
+        string calldata description,
+        string calldata image,
+        string[4] calldata urls,
+        uint256 purchaseAmount
+    ) external returns (address token, uint256 tokensOut) {
+        return _launchWithParams(name, symbol, cores, description, image, urls, purchaseAmount);
+    }
+
+    function _launchWithParams(
+        string memory name,
+        string memory symbol,
+        uint8[] memory cores,
+        string memory description,
+        string memory image,
+        string[4] memory urls,
+        uint256 purchaseAmount
+    ) internal returns (address token, uint256 tokensOut) {
+        require(bondingContract != address(0), "bonding contract not set");
+        require(bytes(name).length > 0, "empty name");
+        require(bytes(symbol).length > 0, "empty symbol");
+
+        // Transfer tokens from user to this contract first
+        VIRTUAL.safeTransferFrom(msg.sender, address(this), purchaseAmount);
+        
+        // Approve the bonding contract to spend the full amount
+        VIRTUAL.approve(bondingContract, purchaseAmount);
+
+        // Launch token through the Bonding contract
+        (address tokenAddress, address pairAddress, uint256 tokenIndex) = IBonding(bondingContract).launch(
+            name,
+            symbol,
+            cores.length > 0 ? cores : _getDefaultCores(),
+            description,
+            image,
+            urls,
+            purchaseAmount
+        );
+
+        // Add the launched token to our tracking array so it shows up in the frontend
+        allAgents.push(tokenAddress);
+
+        emit AgentLaunched(tokenAddress, msg.sender, purchaseAmount);
+        
+        return (tokenAddress, tokensOut);
+    }
+
+    function _getDefaultCores() internal pure returns (uint8[] memory) {
+        uint8[] memory defaultCores = new uint8[](1);
+        defaultCores[0] = 1; // Default core value
+        return defaultCores;
     }
 
     /**
