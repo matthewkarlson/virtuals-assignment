@@ -128,8 +128,7 @@ def generate_hyperbola_data(token_supply, virtuals_liquidity, num_points=200):
     """
     k = token_supply * virtuals_liquidity
     
-    # Generate x values (token reserves) from 10% to 150% of initial supply
-    x_min = token_supply * 0.1
+    x_min = token_supply * 0.05 * 5000/asset_rate
     x_max = token_supply * 1.5
     x_values = np.linspace(x_min, x_max, num_points)
     
@@ -151,10 +150,10 @@ st.sidebar.header("📊 Curve Parameters")
 # Asset Rate with slider
 asset_rate = st.sidebar.slider(
     "Asset Rate", 
-    min_value=100, 
-    max_value=5000, 
+    min_value=1000, 
+    max_value=20000, 
     value=DEFAULT_ASSET_RATE, 
-    step=50,
+    step=1000,
     help="Lower values create higher initial prices and steeper curves (from Bonding.sol)"
 )
 
@@ -273,8 +272,7 @@ with hyperbola_col2:
     st.metric("Graduation Point", f"({graduation_token_threshold/1_000_000:.0f}M, {grad_virtuals_at_graduation:.0f})")
     
     # Show how asset rate affects the curve
-    st.subheader("📊 Asset Rate Impact")
-    st.write(f"**Current k-value:** {k_value:.2e}")
+    st.subheader("📊 Tokenomics")
     
     # Calculate k for different asset rates for comparison
     if asset_rate != DEFAULT_ASSET_RATE:
@@ -282,7 +280,7 @@ with hyperbola_col2:
         default_k = initial_supply * default_liquidity
         k_ratio = k_value / default_k
         st.write(f"**vs Default k:** {k_ratio:.2f}x")
-    
+     
     st.markdown("""
     **Key Insights:**
     - Lower asset rate → Higher k → Curve further from origin
@@ -469,26 +467,3 @@ with col4:
         st.write(f"**New price:** {new_price:.8f} Virtuals/Token")
         st.write(f"**Price impact:** {price_impact:.2f}%")
         st.write(f"**New token reserve:** {new_token_reserve:,.0f}")
-
-# Mathematical explanation
-st.subheader("📝 Mathematical Model")
-st.markdown("""
-This bonding curve uses the **constant product formula** (x × y = k):
-
-**Key Formulas:**
-- Initial Liquidity: `k = ((K × 10000) / assetRate)`, then `liquidity = (k × 10000) / supply / 10000`
-- Price: `price = virtuals_reserve / token_reserve`
-- Buy: `tokens_out = (virtuals_in × token_reserve) / (virtuals_reserve + virtuals_in)`
-- Sell: `virtuals_out = (tokens_in × virtuals_reserve) / (token_reserve + tokens_in)`
-
-**Graduation Mechanism:**
-- Graduation occurs when enough tokens are sold to raise the target amount of Virtuals
-- Token reserve drops to: `k / (initial_virtuals + graduation_threshold)`
-- This ensures the bonding curve has raised exactly the graduation threshold in Virtuals
-
-**Features:**
-- ✅ Constant product AMM (like Uniswap V2)
-- ✅ 0.3% trading fee included
-- ✅ Graduation based on token reserves (reserveA)
-- ✅ Real-time price impact calculation
-""")
