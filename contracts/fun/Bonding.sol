@@ -319,12 +319,14 @@ contract Bonding is
         (uint256 amount1In, uint256 amount0Out) = router.buy(
             amountIn,
             tokenAddress,
-            buyer
+            address(this)
         );
 
         if (amount0Out < amountOutMin) {
             revert SlippageTooHigh();
         }
+
+        FERC20(tokenAddress).transfer(buyer, amount0Out);
 
         uint256 newReserveA = reserveA - amount0Out;
         uint256 duration = block.timestamp -
@@ -349,6 +351,13 @@ contract Bonding is
         if (!tokenInfo[tokenAddress].trading) {
             revert InvalidTokenStatus();
         }
+
+        // Transfer VIRTUAL tokens from user to this contract first
+        address assetToken = router.assetToken();
+        IERC20(assetToken).safeTransferFrom(msg.sender, address(this), amountIn);
+        
+        // Approve router to spend the VIRTUAL tokens
+        IERC20(assetToken).forceApprove(address(router), amountIn);
 
         _buy(msg.sender, amountIn, tokenAddress, amountOutMin, deadline);
 

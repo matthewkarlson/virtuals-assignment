@@ -1,17 +1,17 @@
 // Contract addresses from deployment
 export const CONTRACTS = {
-  EASYV: "0x956d3A0B3161f79E6809cc1313E8F32B0de73B70",
-  AGENT_FACTORY: "0x72cdd30c3989D7f87bA563b0DA6ECcdd79fcdA9F",
-  BONDING_CONTRACT: "0xE6711c866D4ee72663521CB2ff8B72879b5f40D0",
+  EASYV: "0x439c09706D52e577B036E67b63308C7f218d2b22",
+  AGENT_FACTORY: "0x2948dcd1B5537E3C0a596716b908AE23ab06CDa9",
+  BONDING_CONTRACT: "0x5c381F8Fb58622beD71119dEA591e7aeF5Bc52F0",
   // Uniswap V2 Router (for local testing - this would be different on mainnet)
   UNISWAP_ROUTER: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
 } as const;
 
 // Contract addresses - these will be set after deployment
 export const CONTRACT_ADDRESSES = {
-  EasyV: process.env.NEXT_PUBLIC_EASYV_ADDRESS || "0x956d3A0B3161f79E6809cc1313E8F32B0de73B70",
-  AgentFactory: process.env.NEXT_PUBLIC_AGENT_FACTORY_ADDRESS || "0x72cdd30c3989D7f87bA563b0DA6ECcdd79fcdA9F",
-  BondingContract: process.env.NEXT_PUBLIC_BONDING_ADDRESS || "0xE6711c866D4ee72663521CB2ff8B72879b5f40D0",
+  EasyV: process.env.NEXT_PUBLIC_EASYV_ADDRESS || "0x439c09706D52e577B036E67b63308C7f218d2b22",
+  AgentFactory: process.env.NEXT_PUBLIC_AGENT_FACTORY_ADDRESS || "0x2948dcd1B5537E3C0a596716b908AE23ab06CDa9",
+  BondingContract: process.env.NEXT_PUBLIC_BONDING_ADDRESS || "0x5c381F8Fb58622beD71119dEA591e7aeF5Bc52F0",
 } as const;
 
 // Import TypeChain generated types - only import what exists
