@@ -109,8 +109,8 @@ contract Bonding is
         address agentFactory_,
         uint256 gradThreshold_
     ) external initializer {
-        __Ownable_init(msg.sender);
         __ReentrancyGuard_init();
+        __Ownable_init(msg.sender);
 
         factory = FFactory(factory_);
         router = FRouter(router_);
