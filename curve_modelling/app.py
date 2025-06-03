@@ -245,10 +245,12 @@ with hyperbola_col1:
         x=graduation_token_threshold / 1_000_000,
         y=grad_virtuals_at_graduation,
         text=f"Graduation<br>({graduation_token_threshold/1_000_000:.0f}M tokens, {grad_virtuals_at_graduation:.0f} virtuals)",
-        showarrow=True,
+        showarrow=False,
         arrowhead=2,
         arrowcolor="green",
-        arrowwidth=2
+        arrowwidth=2,
+        xshift=70,
+        yshift=20
     )
     
     fig_hyperbola.update_layout(

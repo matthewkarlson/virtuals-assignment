@@ -330,7 +330,7 @@ export default function Home() {
       <div className="min-h-screen bg-gradient-to-br from-purple-50 to-indigo-100 flex items-center justify-center">
         <Card className="w-full max-w-md">
           <CardHeader className="text-center">
-            <CardTitle className="text-2xl font-bold">Virtuals Fun</CardTitle>
+            <CardTitle className="text-2xl font-bold">EasyV Agent Launcher</CardTitle>
             <CardDescription>
               Launch and trade tokens on the fun system
             </CardDescription>
@@ -350,7 +350,7 @@ export default function Home() {
       <div className="container mx-auto px-4 py-8">
         {/* Header */}
         <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-gray-900 mb-2">Virtuals Fun</h1>
+          <h1 className="text-4xl font-bold text-gray-900 mb-2">EasyV</h1>
           <p className="text-lg text-gray-600">Launch and trade tokens on the fun system</p>
         </div>
 
@@ -375,8 +375,8 @@ export default function Home() {
                 <p className="text-sm font-mono bg-gray-100 p-2 rounded">{address}</p>
               </div>
               <div>
-                <Label>VIRTUAL Balance</Label>
-                <p className="text-lg font-bold">{virtualBalance} VIRTUAL</p>
+                <Label>EasyV Balance</Label>
+                <p className="text-lg font-bold">{virtualBalance} EASYV</p>
               </div>
             </div>
           </CardContent>
@@ -387,7 +387,7 @@ export default function Home() {
           <CardHeader>
             <CardTitle>Launch New Token</CardTitle>
             <CardDescription>
-              Create a new token on the fun system (Minimum: 6,000 VIRTUAL)
+              Create a new token on the fun system (Minimum: 6,000 EASYV)
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -411,7 +411,7 @@ export default function Home() {
                 />
               </div>
               <div>
-                <Label htmlFor="deposit">Initial Purchase (VIRTUAL)</Label>
+                <Label htmlFor="deposit">Initial Purchase (EASYV)</Label>
                 <Input
                   id="deposit"
                   type="number"
@@ -466,7 +466,7 @@ export default function Home() {
                     {token.trading && (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="space-y-2">
-                          <Label>Buy Tokens (VIRTUAL)</Label>
+                          <Label>Buy Tokens (EASYV)</Label>
                           <div className="flex gap-2">
                             <Input
                               type="number"
