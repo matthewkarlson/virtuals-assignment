@@ -58,60 +58,120 @@ export default function Home() {
   const connectWallet = async () => {
     try {
       setLoading(true);
+      console.log('🔗 loading set to true: connectWallet')
+      
+      console.log('🔗 Calling web3Service.connect()...');
       const addr = await web3Service.connect();
+      console.log('✅ web3Service.connect() completed, address:', addr);
+      
       setAddress(addr);
       setIsConnected(true);
+      
+      console.log('📊 Calling loadData()...');
       await loadData();
+      console.log('✅ loadData() completed');
+      
+      setLoading(false);
+      console.log('🔄 loading set to false: connectWallet')
     } catch (error) {
-      console.error('Failed to connect wallet:', error);
+      console.error('❌ Failed to connect wallet:', error);
       alert('Failed to connect wallet. Make sure MetaMask is installed and connected to Hardhat network.');
     } finally {
       setLoading(false);
+      console.log('🔄 loading set to false in finally block')
     }
   };
 
   const loadData = async () => {
     try {
+      console.log('📊 loadData: Getting current address...');
       // Get current address
       const currentAddress = await web3Service.getAddress();
+      console.log('✅ loadData: Got address:', currentAddress);
       
+      console.log('🌐 loadData: Checking network status...');
       // Check network status
       const network = await web3Service.getCurrentNetwork();
+      console.log('✅ loadData: Network status:', network);
       setNetworkStatus(network);
       
       if (!network.isCorrect) {
-        console.warn(`Wrong network detected. Expected Chain ID: 31337, Current: ${network.chainId}`);
+        console.warn(`⚠️ Wrong network detected. Expected Chain ID: 31337, Current: ${network.chainId}`);
         return; // Don't try to load contract data on wrong network
       }
       
-      // Load VIRTUAL balance
-      const virtualContract = web3Service.getEasyVContract();
-      const balance = await virtualContract.balanceOf(currentAddress);
-      setVirtualBalance(web3Service.formatEther(balance));
+      console.log('💰 loadData: Loading VIRTUAL balance...');
+      // Load VIRTUAL balance - try read-only provider
+      try {
+        const { ethers } = await import('ethers');
+        
+        console.log('💰 Creating read-only provider...');
+        // Use read-only JSON-RPC provider instead of browser provider
+        const provider = new ethers.JsonRpcProvider('http://localhost:8545');
+        
+        // Simple ERC20 ABI for balanceOf
+        const erc20ABI = [
+          "function balanceOf(address owner) view returns (uint256)"
+        ];
+        
+        const contract = new ethers.Contract(
+          "0x292E27B2b439Bb485265aBA27c131247B13593c1", 
+          erc20ABI, 
+          provider
+        );
+        
+        console.log('💰 Calling balanceOf with read-only provider...');
+        const balance = await contract.balanceOf(currentAddress);
+        console.log('✅ loadData: Got balance:', ethers.formatEther(balance));
+        setVirtualBalance(ethers.formatEther(balance));
+      } catch (error) {
+        console.error('❌ Read-only balance call failed:', error);
+        // Fallback to showing 0 balance
+        setVirtualBalance('0');
+      }
 
+      console.log('🎯 loadData: Loading tokens...');
       // Load tokens
       await loadTokens();
+      console.log('✅ loadData: Tokens loaded successfully');
     } catch (error) {
-      console.error('Failed to load data:', error);
+      console.error('❌ Failed to load data:', error);
     }
   };
 
   const loadTokens = async () => {
     try {
+      console.log('🎯 loadTokens: Starting...');
       const currentAddress = await web3Service.getAddress();
       if (!currentAddress) {
-        console.warn('No wallet address available, skipping balance checks');
+        console.warn('⚠️ No wallet address available, skipping balance checks');
         return;
       }
+      console.log('✅ loadTokens: Current address:', currentAddress);
       
-      const bondingContract = web3Service.getBondingContract();
+      // Use read-only provider for all contract reads
+      const { ethers } = await import('ethers');
+      const provider = new ethers.JsonRpcProvider('http://localhost:8545');
       
+      console.log('🏭 loadTokens: Getting bonding contract...');
+      const bondingContract = new ethers.Contract(
+        "0x0454a4798602babb16529F49920E8B2f4a747Bb2",
+        ABIS.Bonding,
+        provider
+      );
+      
+      console.log('🏭 loadTokens: Getting factory address...');
       // Get factory contract to access pairs list
       const factoryAddress = await bondingContract.factory();
-      const factoryContract = web3Service.getContract(factoryAddress, ABIS.FFactory);
+      console.log('✅ loadTokens: Factory address:', factoryAddress);
       
+      console.log('🏭 loadTokens: Getting factory contract...');
+      const factoryContract = new ethers.Contract(factoryAddress, ABIS.FFactory, provider);
+      
+      console.log('📊 loadTokens: Getting pair count...');
       // Get total number of pairs (each pair corresponds to a launched token)
       const pairCount = await factoryContract.allPairsLength();
+      console.log('✅ loadTokens: Found', pairCount.toString(), 'pairs');
       
       const allTokenData: Token[] = [];
       for (let i = 0; i < pairCount; i++) {
@@ -120,21 +180,21 @@ export default function Home() {
           const pairAddress = await factoryContract.pairs(i);
           
           // Get the pair contract to find out what tokens it contains
-          const pairContract = web3Service.getContract(pairAddress, ABIS.FPair);
+          const pairContract = new ethers.Contract(pairAddress, ABIS.FPair, provider);
           const [tokenA, tokenB] = await Promise.all([
             pairContract.tokenA(),
             pairContract.tokenB()
           ]);
           
           // The VIRTUAL token (EasyV) is one of them, the other is our launched token
-          const virtualAddress = web3Service.getEasyVAddress();
+          const virtualAddress = "0x292E27B2b439Bb485265aBA27c131247B13593c1"; // EasyV address
           const tokenAddress = tokenA.toLowerCase() === virtualAddress.toLowerCase() ? tokenB : tokenA;
           
           // Get token info from bonding contract
           const tokenInfo = await bondingContract.tokenInfo(tokenAddress);
           
           // Get the FERC20 token contract
-          const tokenContract = web3Service.getFERC20Contract(tokenAddress);
+          const tokenContract = new ethers.Contract(tokenAddress, ABIS.FERC20, provider);
           const [name, symbol] = await Promise.all([
             tokenContract.name(),
             tokenContract.symbol(),
@@ -152,7 +212,7 @@ export default function Home() {
             tradingOnUniswap: tokenInfo.tradingOnUniswap,
             description: tokenInfo.description,
             image: tokenInfo.image,
-            userBalance: web3Service.formatEther(userBalance),
+            userBalance: ethers.formatEther(userBalance),
           });
         } catch (error) {
           console.error(`Failed to load token from pair ${i}:`, error);
@@ -180,6 +240,7 @@ export default function Home() {
 
     try {
       setLoading(true);
+      console.log('🚀 createToken: Starting token creation...');
       
       const currentAddress = await web3Service.getAddress();
       if (!currentAddress) {
@@ -187,24 +248,42 @@ export default function Home() {
         return;
       }
       
-      const virtualContract = web3Service.getEasyVContract();
-      const bondingContract = web3Service.getBondingContract();
       const depositAmount = web3Service.parseEther(deposit);
+      console.log('💰 createToken: Deposit amount:', depositAmount.toString());
 
-      // Check balance
-      const balance = await virtualContract.balanceOf(currentAddress);
+      // Check balance using read-only provider
+      console.log('💰 createToken: Checking VIRTUAL balance...');
+      const { ethers } = await import('ethers');
+      const readProvider = new ethers.JsonRpcProvider('http://localhost:8545');
+      const erc20ABI = ["function balanceOf(address owner) view returns (uint256)"];
+      const virtualReadContract = new ethers.Contract(
+        "0x292E27B2b439Bb485265aBA27c131247B13593c1",
+        erc20ABI,
+        readProvider
+      );
+      
+      const balance = await virtualReadContract.balanceOf(currentAddress);
+      console.log('✅ createToken: Current balance:', ethers.formatEther(balance));
+      
       if (balance < depositAmount) {
-        alert('Insufficient VIRTUAL balance');
+        alert(`Insufficient VIRTUAL balance. You have ${ethers.formatEther(balance)} but need ${ethers.formatEther(depositAmount)}`);
         return;
       }
 
+      // Now use MetaMask contracts for transactions
+      console.log('🔗 createToken: Getting MetaMask contracts for transactions...');
+      const virtualContract = web3Service.getEasyVContract();
+      const bondingContract = web3Service.getBondingContract();
+
       // Approve bonding contract to spend VIRTUAL
-      console.log('Approving VIRTUAL spend...');
+      console.log('✅ createToken: Approving VIRTUAL spend...');
       const approveTx = await virtualContract.approve(bondingContract.target, depositAmount);
+      console.log('📝 createToken: Approval transaction sent, waiting for confirmation...');
       await approveTx.wait();
+      console.log('✅ createToken: Approval confirmed');
 
       // Launch token directly through bonding contract
-      console.log('Launching token...');
+      console.log('🚀 createToken: Launching token...');
       const launchTx = await bondingContract.launch(
         tokenName,
         tokenSymbol,
@@ -214,7 +293,9 @@ export default function Home() {
         ['', '', '', ''], // URLs array
         depositAmount
       );
+      console.log('📝 createToken: Launch transaction sent, waiting for confirmation...');
       await launchTx.wait();
+      console.log('🎉 createToken: Token launched successfully!');
 
       alert('Token launched successfully!');
       
@@ -222,12 +303,15 @@ export default function Home() {
       setTokenName('');
       setTokenSymbol('');
       setDeposit('6000');
+      console.log('🔄 createToken: Reloading data...');
       await loadData();
+      console.log('✅ createToken: Data reloaded');
     } catch (error) {
-      console.error('Failed to create token:', error);
+      console.error('❌ createToken: Failed to create token:', error);
       alert('Failed to create token: ' + (error instanceof Error ? error.message : 'Unknown error'));
     } finally {
       setLoading(false);
+      console.log('🔄 createToken: Loading set to false')
     }
   };
 
@@ -239,7 +323,7 @@ export default function Home() {
 
     try {
       setLoading(true);
-      
+      console.log('loading set to true')
       const currentAddress = await web3Service.getAddress();
       if (!currentAddress) {
         alert('Wallet not connected');
@@ -275,6 +359,7 @@ export default function Home() {
       alert('Failed to buy tokens: ' + (error instanceof Error ? error.message : 'Unknown error'));
     } finally {
       setLoading(false);
+      console.log('loading set to false')
     }
   };
 
@@ -286,7 +371,7 @@ export default function Home() {
 
     try {
       setLoading(true);
-      
+      console.log('loading set to true')
       const currentAddress = await web3Service.getAddress();
       if (!currentAddress) {
         alert('Wallet not connected');
@@ -322,6 +407,7 @@ export default function Home() {
       alert('Failed to sell tokens: ' + (error instanceof Error ? error.message : 'Unknown error'));
     } finally {
       setLoading(false);
+      console.log('loading set to false')
     }
   };
 

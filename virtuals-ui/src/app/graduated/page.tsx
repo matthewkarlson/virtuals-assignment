@@ -109,8 +109,17 @@ export default function GraduatedAgents() {
         return;
       }
       
-      // Get graduated tokens from the main Bonding contract
-      const bondingContract = web3Service.getBondingContract();
+      // Get graduated tokens from the main Bonding contract using read-only provider
+      const { ethers } = await import('ethers');
+      const provider = new ethers.JsonRpcProvider('http://localhost:8545');
+      
+      // Import the Bonding ABI
+      const { ABIS } = await import('@/lib/contracts');
+      const bondingContract = new ethers.Contract(
+        "0x0454a4798602babb16529F49920E8B2f4a747Bb2", // Bonding contract address
+        ABIS.Bonding,
+        provider
+      );
       
       // Get all graduated tokens from the graduatedTokens array
       const graduatedTokenAddresses: string[] = [];
@@ -121,9 +130,18 @@ export default function GraduatedAgents() {
             const tokenAddress = await bondingContract.graduatedTokens(index);
             graduatedTokenAddresses.push(tokenAddress);
             index++;
-          } catch (error) {
-            // End of array reached
-            break;
+          } catch (error: any) {
+            // End of array reached - check for specific revert error
+            if (error?.code === 'CALL_EXCEPTION' || 
+                error?.message?.includes('execution reverted') ||
+                error?.message?.includes('out of bounds') ||
+                error?.reason === 'require(false)') {
+              console.log(`📋 Reached end of graduatedTokens array at index ${index}`);
+              break;
+            } else {
+              // Different error - rethrow
+              throw error;
+            }
           }
         }
       } catch (error) {
@@ -152,21 +170,26 @@ export default function GraduatedAgents() {
             continue;
           }
 
-          // Get token contract to fetch name and symbol
-          const tokenContract = web3Service.getFERC20Contract(tokenAddress);
+          // Get token contract to fetch name and symbol using read-only provider
+          const tokenContract = new ethers.Contract(tokenAddress, ABIS.FERC20, provider);
           const [name, symbol] = await Promise.all([
             tokenContract.name(),
             tokenContract.symbol(),
           ]);
 
-          // Get user balances using the current address
+          // Get user balances using read-only provider
+          const easyVContract = new ethers.Contract(
+            "0x292E27B2b439Bb485265aBA27c131247B13593c1", // EasyV address
+            ABIS.EasyV,
+            provider
+          );
           const [tokenBalance, easyVBalance] = await Promise.all([
             tokenContract.balanceOf(currentAddress),
-            web3Service.getEasyVContract().balanceOf(currentAddress),
+            easyVContract.balanceOf(currentAddress),
           ]);
 
-          // Get pool reserves from Uniswap pair
-          const pairContract = web3Service.getUniswapPairContract(tokenInfo.uniswapPair);
+          // Get pool reserves from Uniswap pair using read-only provider
+          const pairContract = new ethers.Contract(tokenInfo.uniswapPair, ABIS.IUniswapV2Pair, provider);
           const [reserves, token0, token1] = await Promise.all([
             pairContract.getReserves(),
             pairContract.token0(),
@@ -189,11 +212,11 @@ export default function GraduatedAgents() {
             virtualRaised: '0', // This data is not easily available from tokenInfo, could be calculated if needed
             externalTokenAddress: tokenAddress, // The token itself is the external token after graduation
             uniswapPairAddress: tokenInfo.uniswapPair,
-            tokenBalance: web3Service.formatEther(tokenBalance),
-            easyVBalance: web3Service.formatEther(easyVBalance),
+            tokenBalance: ethers.formatEther(tokenBalance),
+            easyVBalance: ethers.formatEther(easyVBalance),
             poolReserves: {
-              token: web3Service.formatEther(tokenReserve),
-              easyV: web3Service.formatEther(easyVReserve),
+              token: ethers.formatEther(tokenReserve),
+              easyV: ethers.formatEther(easyVReserve),
               price,
             },
           });
