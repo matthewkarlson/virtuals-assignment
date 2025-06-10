@@ -13,6 +13,8 @@ import "./IFPair.sol";
 import "./FRouter.sol";
 import "./FERC20.sol";
 import "../interfaces/IAgentFactoryV3.sol";
+import "../interfaces/IUniswapV2Factory.sol";
+import "../interfaces/IUniswapV2Router02.sol";
 
 contract Bonding is
     Initializable,
@@ -32,6 +34,10 @@ contract Bonding is
     uint256 public gradThreshold;
     uint256 public maxTx;
     address public agentFactory;
+    
+    // Uniswap V2 mainnet addresses
+    address public constant UNISWAP_V2_FACTORY = 0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f;
+    address public constant UNISWAP_V2_ROUTER = 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D;
     struct Profile {
         address user;
         address[] tokens;
@@ -41,6 +47,7 @@ contract Bonding is
         address creator;
         address token;
         address pair;
+        address uniswapPair;
         address agentToken;
         Data data;
         string description;
@@ -218,8 +225,9 @@ contract Bonding is
         Token memory tmpToken = Token({
             creator: msg.sender,
             token: address(token),
-            agentToken: address(0),
             pair: _pair,
+            uniswapPair: address(0),
+            agentToken: address(0),
             data: _data,
             description: desc,
             cores: cores,
@@ -373,7 +381,7 @@ contract Bonding is
         _token.trading = false;
         _token.tradingOnUniswap = true;
 
-        // Transfer asset tokens to bonding contract
+        // Get remaining balances from bonding curve pair
         address pairAddress = factory.getPair(
             tokenAddress,
             router.assetToken()
@@ -384,10 +392,41 @@ contract Bonding is
         uint256 assetBalance = pair.assetBalance();
         uint256 tokenBalance = pair.balance();
 
+        // Graduate from bonding curve
         router.graduate(tokenAddress);
         graduatedTokens.push(tokenAddress);
-        IERC20(router.assetToken()).forceApprove(agentFactory, assetBalance);
 
+        // Create Uniswap V2 pair
+        address assetToken = router.assetToken();
+        IUniswapV2Factory uniswapFactory = IUniswapV2Factory(UNISWAP_V2_FACTORY);
+        IUniswapV2Router02 uniswapRouter = IUniswapV2Router02(UNISWAP_V2_ROUTER);
+
+        // Check if pair already exists, if not create it
+        address uniswapPair = uniswapFactory.getPair(tokenAddress, assetToken);
+        if (uniswapPair == address(0)) {
+            uniswapPair = uniswapFactory.createPair(tokenAddress, assetToken);
+        }
+
+        // Store the Uniswap pair address
+        _token.uniswapPair = uniswapPair;
+
+        // Transfer tokens to this contract and approve router for adding liquidity
+        IERC20(assetToken).forceApprove(address(uniswapRouter), assetBalance);
+        IERC20(tokenAddress).forceApprove(address(uniswapRouter), tokenBalance);
+
+        // Add liquidity to Uniswap V2
+        uniswapRouter.addLiquidity(
+            tokenAddress,
+            assetToken,
+            tokenBalance,
+            assetBalance,
+            0, // Accept any amount of tokens
+            0, // Accept any amount of asset tokens
+            address(this), // LP tokens to bonding contract
+            block.timestamp + 300 // 5 minute deadline
+        );
+
+        // Burn tokens from bonding curve pair
         token_.burnFrom(pairAddress, tokenBalance);
 
         emit Graduated(tokenAddress);
