@@ -109,51 +109,64 @@ export default function GraduatedAgents() {
         return;
       }
       
-      const factoryContract = web3Service.getAgentFactoryContract();
-      const agentAddresses = await factoryContract.allAgents();
+      // Get graduated tokens from the main Bonding contract
+      const bondingContract = web3Service.getBondingContract();
+      
+      // Get all graduated tokens from the graduatedTokens array
+      const graduatedTokenAddresses: string[] = [];
+      try {
+        let index = 0;
+        while (true) {
+          try {
+            const tokenAddress = await bondingContract.graduatedTokens(index);
+            graduatedTokenAddresses.push(tokenAddress);
+            index++;
+          } catch (error) {
+            // End of array reached
+            break;
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load graduated tokens list:', error);
+        return;
+      }
+
+      console.log(`Found ${graduatedTokenAddresses.length} graduated tokens:`, graduatedTokenAddresses);
       
       const graduatedData: GraduatedAgent[] = [];
       
-      for (const agentAddress of agentAddresses) {
+      for (const tokenAddress of graduatedTokenAddresses) {
         try {
-          const bondingCurve = web3Service.getBondingCurveContract(agentAddress);
-          const graduated = await bondingCurve.graduated();
+          // Get token info from the main Bonding contract
+          const tokenInfo = await bondingContract.tokenInfo(tokenAddress);
           
-          if (!graduated) continue; // Skip non-graduated agents
-          
-          const [virtualRaised, creator, externalTokenAddress, uniswapPairAddress] = await Promise.all([
-            bondingCurve.virtualRaised(),
-            bondingCurve.creator(),
-            bondingCurve.eToken(),
-            bondingCurve.uniswapPair(),
-          ]);
+          // Validate that the token is actually graduated
+          if (!tokenInfo.tradingOnUniswap) {
+            console.warn(`Token ${tokenAddress} is in graduated list but not trading on Uniswap`);
+            continue;
+          }
 
           // Validate that we have valid addresses
-          if (!externalTokenAddress || externalTokenAddress === '0x0000000000000000000000000000000000000000') {
-            console.warn(`Agent ${agentAddress} is graduated but has no external token address`);
+          if (!tokenInfo.uniswapPair || tokenInfo.uniswapPair === '0x0000000000000000000000000000000000000000') {
+            console.warn(`Token ${tokenAddress} is graduated but has no Uniswap pair address`);
             continue;
           }
 
-          if (!uniswapPairAddress || uniswapPairAddress === '0x0000000000000000000000000000000000000000') {
-            console.warn(`Agent ${agentAddress} is graduated but has no Uniswap pair address`);
-            continue;
-          }
-
-          // Get token info
-          const externalToken = web3Service.getAgentTokenExternalContract(externalTokenAddress);
+          // Get token contract to fetch name and symbol
+          const tokenContract = web3Service.getFERC20Contract(tokenAddress);
           const [name, symbol] = await Promise.all([
-            externalToken.name(),
-            externalToken.symbol(),
+            tokenContract.name(),
+            tokenContract.symbol(),
           ]);
 
           // Get user balances using the current address
           const [tokenBalance, easyVBalance] = await Promise.all([
-            externalToken.balanceOf(currentAddress),
+            tokenContract.balanceOf(currentAddress),
             web3Service.getEasyVContract().balanceOf(currentAddress),
           ]);
 
-          // Get pool reserves
-          const pairContract = web3Service.getUniswapPairContract(uniswapPairAddress);
+          // Get pool reserves from Uniswap pair
+          const pairContract = web3Service.getUniswapPairContract(tokenInfo.uniswapPair);
           const [reserves, token0, token1] = await Promise.all([
             pairContract.getReserves(),
             pairContract.token0(),
@@ -161,7 +174,7 @@ export default function GraduatedAgents() {
           ]);
 
           // Determine which token is which
-          const isToken0Agent = token0.toLowerCase() === externalTokenAddress.toLowerCase();
+          const isToken0Agent = token0.toLowerCase() === tokenAddress.toLowerCase();
           const tokenReserve = isToken0Agent ? reserves[0] : reserves[1];
           const easyVReserve = isToken0Agent ? reserves[1] : reserves[0];
           
@@ -169,13 +182,13 @@ export default function GraduatedAgents() {
           const price = easyVReserve > BigInt(0) ? (Number(easyVReserve) / Number(tokenReserve)).toFixed(6) : '0';
 
           graduatedData.push({
-            address: agentAddress,
-            name: name.replace('fun ', ''), // Remove "fun " prefix
-            symbol: symbol.replace('f', ''), // Remove "f" prefix
-            creator,
-            virtualRaised: web3Service.formatEther(virtualRaised),
-            externalTokenAddress,
-            uniswapPairAddress,
+            address: tokenAddress,
+            name: name.replace('fun ', ''), // Remove "fun " prefix if present
+            symbol: symbol.replace('f', ''), // Remove "f" prefix if present
+            creator: tokenInfo.creator,
+            virtualRaised: '0', // This data is not easily available from tokenInfo, could be calculated if needed
+            externalTokenAddress: tokenAddress, // The token itself is the external token after graduation
+            uniswapPairAddress: tokenInfo.uniswapPair,
             tokenBalance: web3Service.formatEther(tokenBalance),
             easyVBalance: web3Service.formatEther(easyVBalance),
             poolReserves: {
@@ -185,10 +198,11 @@ export default function GraduatedAgents() {
             },
           });
         } catch (error) {
-          console.error(`Failed to load graduated agent ${agentAddress}:`, error);
+          console.error(`Failed to load graduated token ${tokenAddress}:`, error);
         }
       }
       
+      console.log(`Successfully loaded ${graduatedData.length} graduated tokens`);
       setGraduatedAgents(graduatedData);
     } catch (error) {
       console.error('Failed to load graduated agents:', error);
@@ -255,7 +269,7 @@ export default function GraduatedAgents() {
         tokenToApprove = easyVContract;
       } else {
         // Selling tokens for EasyV
-        const tokenContract = web3Service.getAgentTokenExternalContract(agent.externalTokenAddress);
+        const tokenContract = web3Service.getFERC20Contract(agent.externalTokenAddress);
         path = [agent.externalTokenAddress, web3Service.getEasyVAddress()];
         tokenToApprove = tokenContract;
       }
