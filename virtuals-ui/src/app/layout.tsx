@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Virtuals Protocol - AI Agent Trading",
-  description: "Create and trade AI agents with bonding curves",
+  title: "EasyV - Virtuals Token Launch Clone",
+  description: "Create and trade tokens on the bonding curve, purchase enough to graduate to Uniswap",
 };
 
 export default function RootLayout({
