@@ -418,7 +418,7 @@ export default function Home() {
           <CardHeader className="text-center">
             <CardTitle className="text-2xl font-bold">EasyV Agent Launcher</CardTitle>
             <CardDescription>
-              Launch and trade tokens on the fun system
+              Launch tokens on the bonding curve, purchase enough to graduate to Uniswap
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -437,7 +437,7 @@ export default function Home() {
         {/* Header */}
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold text-gray-900 mb-2">EasyV</h1>
-          <p className="text-lg text-gray-600">Launch and trade tokens on the fun system</p>
+          <p className="text-lg text-gray-600">Launch tokens on the bonding curve, purchase enough to graduate to Uniswap</p>
         </div>
 
         {/* Network Status */}
